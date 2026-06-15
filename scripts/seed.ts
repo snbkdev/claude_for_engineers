@@ -52,6 +52,7 @@ async function seed() {
     DROP TABLE IF EXISTS quiz_questions;
     DROP TABLE IF EXISTS quizzes;
     DROP TABLE IF EXISTS lesson_progress;
+    DROP TABLE IF EXISTS course_ratings;
     DROP TABLE IF EXISTS coupons;
     DROP TABLE IF EXISTS team_members;
     DROP TABLE IF EXISTS teams;
@@ -1470,6 +1471,69 @@ You've completed the Building REST APIs course. You now have the skills to build
 
   console.log("Created lesson progress records.");
 
+  // ─── Course Ratings ───
+  // Only enrolled students rate (matches the app's "must be enrolled" rule).
+  // Course 1 enrolled: Emma, James, Olivia, Sophia → avg 4.5 (4 ratings)
+  // Course 2 enrolled: Emma, Olivia, Liam → avg 4.0 (3 ratings)
+
+  db.insert(schema.courseRatings)
+    .values([
+      // Course 1: Introduction to TypeScript
+      {
+        userId: students[0].id, // Emma
+        courseId: course1.id,
+        rating: 5,
+        createdAt: daysAgo(8),
+        updatedAt: daysAgo(8),
+      },
+      {
+        userId: students[1].id, // James (completed the course)
+        courseId: course1.id,
+        rating: 5,
+        createdAt: daysAgo(9),
+        updatedAt: daysAgo(9),
+      },
+      {
+        userId: students[2].id, // Olivia
+        courseId: course1.id,
+        rating: 4,
+        createdAt: daysAgo(6),
+        updatedAt: daysAgo(6),
+      },
+      {
+        userId: students[4].id, // Sophia
+        courseId: course1.id,
+        rating: 4,
+        createdAt: daysAgo(3),
+        updatedAt: daysAgo(3),
+      },
+      // Course 2: Building REST APIs with Node.js
+      {
+        userId: students[0].id, // Emma
+        courseId: course2.id,
+        rating: 4,
+        createdAt: daysAgo(7),
+        updatedAt: daysAgo(7),
+      },
+      {
+        userId: students[2].id, // Olivia
+        courseId: course2.id,
+        rating: 5,
+        createdAt: daysAgo(5),
+        updatedAt: daysAgo(5),
+      },
+      {
+        userId: students[3].id, // Liam
+        courseId: course2.id,
+        rating: 3,
+        createdAt: daysAgo(12),
+        updatedAt: daysAgo(12),
+      },
+    ])
+    .run();
+
+  console.log("Created 7 course ratings.");
+
   // ─── Quiz Attempts ───
 
   // Helper to record a quiz attempt with answers
@@ -1735,6 +1799,7 @@ You've completed the Building REST APIs course. You now have the skills to build
   );
   console.log("  Quizzes: 3");
   console.log("  Enrollments: 7");
+  console.log("  Ratings: 7 (course 1 avg 4.5, course 2 avg 4.0)");
   console.log("  Purchases: 6 (5 individual + 1 team)");
   console.log("  Teams: 1 (with 5 coupons)");
 }

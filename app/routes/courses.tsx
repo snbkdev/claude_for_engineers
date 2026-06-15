@@ -6,7 +6,7 @@ import { CourseStatus } from "~/db/schema";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, BookOpen, Search } from "lucide-react";
+import { AlertTriangle, BookOpen, Search, Star } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
 import { UserAvatar } from "~/components/user-avatar";
 import { getCurrentUserId } from "~/lib/session";
@@ -15,6 +15,7 @@ import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import { calculateProgress, getCompletedLessonCount } from "~/services/progressService";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice } from "~/lib/ppp";
+import { getAverageRatingsForCourses } from "~/services/ratingService";
 
 export function meta() {
   return [
@@ -55,17 +56,23 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
+  const courseIds = courses.map((c) => c.id);
+  const ratingsMap = getAverageRatingsForCourses(courseIds);
+
   const coursesWithLessonCount = courses.map((course) => {
     const userProgress = progressMap.get(course.id);
     const pppPrice = course.pppEnabled
       ? calculatePppPrice(course.price, country)
       : course.price;
+    const ratingData = ratingsMap.get(course.id);
     return {
       ...course,
       lessonCount: getLessonCountForCourse(course.id),
       progress: userProgress?.progress ?? null,
       completedLessons: userProgress?.completedLessons ?? null,
       pppPrice,
+      averageRating: ratingData?.average ?? null,
+      ratingCount: ratingData?.count ?? 0,
     };
   });
 
@@ -234,6 +241,18 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
                       className="size-5"
                     />
                     {course.instructorName}
+                    {course.averageRating !== null && (
+                      <>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="flex items-center gap-0.5">
+                          <Star className="size-3 fill-amber-400 text-amber-400" />
+                          <span>{course.averageRating}</span>
+                          <span className="text-muted-foreground/60">
+                            ({course.ratingCount})
+                          </span>
+                        </span>
+                      </>
+                    )}
                   </span>
                   <span className="font-semibold text-foreground">
                     {course.pppPrice < course.price ? (
