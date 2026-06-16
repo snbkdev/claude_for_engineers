@@ -5,7 +5,7 @@ import { lessonComments, users } from "~/db/schema";
 // ─── Comment Service ───
 // Handles lesson comments. Students who own a course leave top-level comments;
 // instructors (and authors) reply via parentId. Replies are one level deep.
-// Uses positional parameters (project convention).
+// Functions with multiple same-typed params take a single object param.
 
 export type LessonCommentWithUser = {
   id: number;
@@ -47,21 +47,21 @@ export function getCommentById(id: number) {
     .get();
 }
 
-export function createComment(
-  userId: number,
-  lessonId: number,
-  content: string,
-  parentId: number | null
-) {
-  const trimmed = content.trim();
+export function createComment(opts: {
+  userId: number;
+  lessonId: number;
+  content: string;
+  parentId: number | null;
+}) {
+  const trimmed = opts.content.trim();
   if (!trimmed) {
     throw new Error("Comment cannot be empty");
   }
 
   // Replies may only attach to a top-level comment on the same lesson.
-  if (parentId !== null) {
-    const parent = getCommentById(parentId);
-    if (!parent || parent.lessonId !== lessonId) {
+  if (opts.parentId !== null) {
+    const parent = getCommentById(opts.parentId);
+    if (!parent || parent.lessonId !== opts.lessonId) {
       throw new Error("Parent comment not found on this lesson");
     }
     if (parent.parentId !== null) {
@@ -71,7 +71,12 @@ export function createComment(
 
   return db
     .insert(lessonComments)
-    .values({ userId, lessonId, content: trimmed, parentId })
+    .values({
+      userId: opts.userId,
+      lessonId: opts.lessonId,
+      content: trimmed,
+      parentId: opts.parentId,
+    })
     .returning()
     .get();
 }

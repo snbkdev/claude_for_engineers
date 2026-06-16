@@ -67,9 +67,15 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (parsed.data.intent === "remove-course") {
-    removeCourseBookmark(currentUserId, parsed.data.courseId);
+    removeCourseBookmark({
+      userId: currentUserId,
+      courseId: parsed.data.courseId,
+    });
   } else {
-    removeLessonBookmark(currentUserId, parsed.data.lessonId);
+    removeLessonBookmark({
+      userId: currentUserId,
+      lessonId: parsed.data.lessonId,
+    });
   }
 
   return { success: true };

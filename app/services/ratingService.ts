@@ -4,10 +4,18 @@ import { courseRatings } from "~/db/schema";
 
 // ─── Rating Service ───
 // Handles course ratings: upsert, lookup, and aggregation.
-// Uses positional parameters (project convention).
+// Functions with multiple same-typed params take a single object param.
 
-export function rateCourse(userId: number, courseId: number, rating: number) {
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+export function rateCourse(opts: {
+  userId: number;
+  courseId: number;
+  rating: number;
+}) {
+  if (
+    !Number.isInteger(opts.rating) ||
+    opts.rating < 1 ||
+    opts.rating > 5
+  ) {
     throw new Error("Rating must be an integer between 1 and 5");
   }
 
@@ -16,8 +24,8 @@ export function rateCourse(userId: number, courseId: number, rating: number) {
     .from(courseRatings)
     .where(
       and(
-        eq(courseRatings.userId, userId),
-        eq(courseRatings.courseId, courseId)
+        eq(courseRatings.userId, opts.userId),
+        eq(courseRatings.courseId, opts.courseId)
       )
     )
     .get();
@@ -25,7 +33,7 @@ export function rateCourse(userId: number, courseId: number, rating: number) {
   if (existing) {
     return db
       .update(courseRatings)
-      .set({ rating, updatedAt: new Date().toISOString() })
+      .set({ rating: opts.rating, updatedAt: new Date().toISOString() })
       .where(eq(courseRatings.id, existing.id))
       .returning()
       .get();
@@ -33,19 +41,23 @@ export function rateCourse(userId: number, courseId: number, rating: number) {
 
   return db
     .insert(courseRatings)
-    .values({ userId, courseId, rating })
+    .values({
+      userId: opts.userId,
+      courseId: opts.courseId,
+      rating: opts.rating,
+    })
     .returning()
     .get();
 }
 
-export function getUserRating(userId: number, courseId: number) {
+export function getUserRating(opts: { userId: number; courseId: number }) {
   return db
     .select()
     .from(courseRatings)
     .where(
       and(
-        eq(courseRatings.userId, userId),
-        eq(courseRatings.courseId, courseId)
+        eq(courseRatings.userId, opts.userId),
+        eq(courseRatings.courseId, opts.courseId)
       )
     )
     .get();

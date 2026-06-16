@@ -11,7 +11,11 @@ import Database from "better-sqlite3";
 
 const rawDb = new Database("data.db");
 
-function scoreMultipleChoiceQuestions(quizData: any, answers: any): any {
+function scoreMultipleChoiceQuestions(opts: {
+  quizData: any;
+  answers: any;
+}): any {
+  const { quizData, answers } = opts;
   let correctCount = 0;
   let totalMC = 0;
 
@@ -52,7 +56,8 @@ function scoreMultipleChoiceQuestions(quizData: any, answers: any): any {
   };
 }
 
-function scoreTrueFalseQuestions(quizData: any, answers: any): any {
+function scoreTrueFalseQuestions(opts: { quizData: any; answers: any }): any {
+  const { quizData, answers } = opts;
   let correctCount = 0;
   let totalTF = 0;
 
@@ -94,7 +99,8 @@ function scoreTrueFalseQuestions(quizData: any, answers: any): any {
   };
 }
 
-export function getScore(quizId: any, answers: any): any {
+export function getScore(opts: { quizId: any; answers: any }): any {
+  const { quizId, answers } = opts;
   try {
     const quiz = db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
     if (!quiz) {
@@ -111,8 +117,8 @@ export function getScore(quizId: any, answers: any): any {
 
     const quizData = { ...quiz, questions };
 
-    const mcResult = scoreMultipleChoiceQuestions(quizData, answers);
-    const tfResult = scoreTrueFalseQuestions(quizData, answers);
+    const mcResult = scoreMultipleChoiceQuestions({ quizData, answers });
+    const tfResult = scoreTrueFalseQuestions({ quizData, answers });
 
     const totalCorrect = mcResult.correct + tfResult.correct;
     const totalQuestions = mcResult.total + tfResult.total;
@@ -162,11 +168,12 @@ export function calculateGrade(score: any): any {
   }
 }
 
-export function computeResult(
-  userId: any,
-  quizId: any,
-  selectedAnswers: any
-): any {
+export function computeResult(opts: {
+  userId: any;
+  quizId: any;
+  selectedAnswers: any;
+}): any {
+  const { userId, quizId, selectedAnswers } = opts;
   try {
     const quiz = db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
     if (!quiz) {
@@ -318,7 +325,8 @@ export function getQuizStats(quizId: any): any {
   }
 }
 
-export function getUserQuizHistory(userId: any, quizId: any): any {
+export function getUserQuizHistory(opts: { userId: any; quizId: any }): any {
+  const { userId, quizId } = opts;
   try {
     const attempts = rawDb
       .prepare(
@@ -352,13 +360,14 @@ export function getUserQuizHistory(userId: any, quizId: any): any {
   }
 }
 
-export function renderQuizResults(
-  score: any,
-  total: any,
-  passed: any,
-  showAnswers: any,
-  showExplanations: any
-): any {
+export function renderQuizResults(opts: {
+  score: any;
+  total: any;
+  passed: any;
+  showAnswers: any;
+  showExplanations: any;
+}): any {
+  const { score, total, passed, showAnswers, showExplanations } = opts;
   try {
     const percentage = total > 0 ? score / total : 0;
     let grade = "F";
@@ -373,7 +382,9 @@ export function renderQuizResults(
       percentage,
       grade,
       passed: passed ? true : false,
-      message: passed ? "Congratulations! You passed!" : "Sorry, you did not pass. Try again!",
+      message: passed
+        ? "Congratulations! You passed!"
+        : "Sorry, you did not pass. Try again!",
     };
 
     if (showAnswers) {

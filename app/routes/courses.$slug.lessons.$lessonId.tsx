@@ -156,34 +156,37 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let isBookmarked = false;
 
   if (currentUserId) {
-    enrolled = isUserEnrolled(currentUserId, course.id);
-    isBookmarked = isLessonBookmarked(currentUserId, lessonId);
+    enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
+    isBookmarked = isLessonBookmarked({ userId: currentUserId, lessonId });
 
     if (enrolled) {
       // Mark lesson as in-progress when viewed
-      markLessonInProgress(currentUserId, lessonId);
-      const progress = getLessonProgress(currentUserId, lessonId);
+      markLessonInProgress({ userId: currentUserId, lessonId });
+      const progress = getLessonProgress({ userId: currentUserId, lessonId });
       lessonStatus = progress?.status ?? null;
 
       // Get progress for all lessons in course (for curriculum sidebar)
-      const progressRecords = getLessonProgressForCourse(
-        currentUserId,
-        course.id
-      );
+      const progressRecords = getLessonProgressForCourse({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
 
       // Get video watch state for resume and progress display
       if (lesson.videoUrl) {
-        lastWatchPosition = getLastWatchPosition(currentUserId, lessonId);
+        lastWatchPosition = getLastWatchPosition({
+          userId: currentUserId,
+          lessonId,
+        });
         const videoDurationSeconds = (lesson.durationMinutes ?? 0) * 60;
         if (videoDurationSeconds > 0) {
-          watchProgress = calculateWatchProgress(
-            currentUserId,
+          watchProgress = calculateWatchProgress({
+            userId: currentUserId,
             lessonId,
-            videoDurationSeconds
-          );
+            videoDurationSeconds,
+          });
         }
       }
     }
@@ -195,7 +198,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let pppPurchaseCountry: string | null = null;
 
   if (enrolled && currentUserId) {
-    const purchase = findPurchase(currentUserId, course.id);
+    const purchase = findPurchase({ userId: currentUserId, courseId: course.id });
     const currentCountry = await resolveCountry(request);
     const pppResult = checkPppAccess(
       course.price,
@@ -213,7 +216,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const isInstructor =
     currentUserId != null && course.instructorId === currentUserId;
   const hasPurchased =
-    currentUserId != null && !!findPurchase(currentUserId, course.id);
+    currentUserId != null && !!findPurchase({ userId: currentUserId, courseId: course.id });
   const canComment = isInstructor || hasPurchased;
 
   const comments = canComment
@@ -270,7 +273,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }
 
     if (currentUserId) {
-      const best = getBestAttempt(currentUserId, quizRecord.id);
+      const best = getBestAttempt({
+        userId: currentUserId,
+        quizId: quizRecord.id,
+      });
       if (best) {
         bestAttempt = { score: best.score, passed: best.passed };
       }
@@ -334,7 +340,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const intent = formData.get("intent");
 
   if (intent === "mark-complete") {
-    markLessonComplete(currentUserId, lessonId);
+    markLessonComplete({ userId: currentUserId, lessonId });
     return { success: true };
   }
 
@@ -356,7 +362,11 @@ export async function action({ params, request }: Route.ActionArgs) {
       }
     }
 
-    const result = computeResult(currentUserId, quizId, selectedAnswers);
+    const result = computeResult({
+      userId: currentUserId,
+      quizId,
+      selectedAnswers,
+    });
     if (!result) {
       throw data("Failed to score quiz", { status: 500 });
     }
@@ -366,7 +376,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "add-comment") {
     const isInstructor = course.instructorId === currentUserId;
-    const hasPurchased = !!findPurchase(currentUserId, course.id);
+    const hasPurchased = !!findPurchase({ userId: currentUserId, courseId: course.id });
     if (!isInstructor && !hasPurchased) {
       throw data("You must own this course to comment", { status: 403 });
     }
@@ -390,7 +400,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       return { commentError: "Comment cannot be empty" };
     }
 
-    createComment(currentUserId, lessonId, content, parentId);
+    createComment({ userId: currentUserId, lessonId, content, parentId });
     return { commentSuccess: true };
   }
 
@@ -418,14 +428,17 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (intent === "toggle-bookmark") {
     // You can only reach a lesson if you own the course (or teach it).
     const isInstructor = course.instructorId === currentUserId;
-    const enrolled = isUserEnrolled(currentUserId, course.id);
+    const enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
     if (!isInstructor && !enrolled) {
       throw data("You must be enrolled to bookmark this lesson", {
         status: 403,
       });
     }
 
-    const { bookmarked } = toggleLessonBookmark(currentUserId, lessonId);
+    const { bookmarked } = toggleLessonBookmark({
+      userId: currentUserId,
+      lessonId,
+    });
     return { bookmarked };
   }
 

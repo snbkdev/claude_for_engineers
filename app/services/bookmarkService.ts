@@ -5,65 +5,101 @@ import { bookmarks, courses, lessons, modules, users } from "~/db/schema";
 // ─── Bookmark Service ───
 // Lets a user save a course (wishlist) or a lesson to return to later.
 // Each bookmark row sets exactly one of courseId / lessonId.
-// Uses positional parameters (project convention).
+// Functions with multiple same-typed params take a single object param.
 
-export function findCourseBookmark(userId: number, courseId: number) {
+export function findCourseBookmark(opts: { userId: number; courseId: number }) {
   return db
     .select()
     .from(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.courseId, courseId)))
+    .where(
+      and(
+        eq(bookmarks.userId, opts.userId),
+        eq(bookmarks.courseId, opts.courseId)
+      )
+    )
     .get();
 }
 
-export function findLessonBookmark(userId: number, lessonId: number) {
+export function findLessonBookmark(opts: { userId: number; lessonId: number }) {
   return db
     .select()
     .from(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.lessonId, lessonId)))
+    .where(
+      and(
+        eq(bookmarks.userId, opts.userId),
+        eq(bookmarks.lessonId, opts.lessonId)
+      )
+    )
     .get();
 }
 
-export function isCourseBookmarked(userId: number, courseId: number) {
-  return !!findCourseBookmark(userId, courseId);
+export function isCourseBookmarked(opts: { userId: number; courseId: number }) {
+  return !!findCourseBookmark(opts);
 }
 
-export function isLessonBookmarked(userId: number, lessonId: number) {
-  return !!findLessonBookmark(userId, lessonId);
+export function isLessonBookmarked(opts: { userId: number; lessonId: number }) {
+  return !!findLessonBookmark(opts);
 }
 
-export function removeCourseBookmark(userId: number, courseId: number) {
+export function removeCourseBookmark(opts: {
+  userId: number;
+  courseId: number;
+}) {
   return db
     .delete(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.courseId, courseId)))
+    .where(
+      and(
+        eq(bookmarks.userId, opts.userId),
+        eq(bookmarks.courseId, opts.courseId)
+      )
+    )
     .run();
 }
 
-export function removeLessonBookmark(userId: number, lessonId: number) {
+export function removeLessonBookmark(opts: {
+  userId: number;
+  lessonId: number;
+}) {
   return db
     .delete(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), eq(bookmarks.lessonId, lessonId)))
+    .where(
+      and(
+        eq(bookmarks.userId, opts.userId),
+        eq(bookmarks.lessonId, opts.lessonId)
+      )
+    )
     .run();
 }
 
 // Adds the bookmark if missing, removes it if present.
 // Returns whether the course is bookmarked after the toggle.
-export function toggleCourseBookmark(userId: number, courseId: number) {
-  if (findCourseBookmark(userId, courseId)) {
-    removeCourseBookmark(userId, courseId);
+export function toggleCourseBookmark(opts: {
+  userId: number;
+  courseId: number;
+}) {
+  if (findCourseBookmark(opts)) {
+    removeCourseBookmark(opts);
     return { bookmarked: false };
   }
 
-  db.insert(bookmarks).values({ userId, courseId }).run();
+  db.insert(bookmarks)
+    .values({ userId: opts.userId, courseId: opts.courseId })
+    .run();
   return { bookmarked: true };
 }
 
-export function toggleLessonBookmark(userId: number, lessonId: number) {
-  if (findLessonBookmark(userId, lessonId)) {
-    removeLessonBookmark(userId, lessonId);
+export function toggleLessonBookmark(opts: {
+  userId: number;
+  lessonId: number;
+}) {
+  if (findLessonBookmark(opts)) {
+    removeLessonBookmark(opts);
     return { bookmarked: false };
   }
 
-  db.insert(bookmarks).values({ userId, lessonId }).run();
+  db.insert(bookmarks)
+    .values({ userId: opts.userId, lessonId: opts.lessonId })
+    .run();
   return { bookmarked: true };
 }
 

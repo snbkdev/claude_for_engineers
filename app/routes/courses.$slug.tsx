@@ -88,24 +88,38 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let isBookmarked = false;
 
   if (currentUserId) {
-    enrolled = isUserEnrolled(currentUserId, course.id);
-    isBookmarked = isCourseBookmarked(currentUserId, course.id);
+    enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
+    isBookmarked = isCourseBookmarked({
+      userId: currentUserId,
+      courseId: course.id,
+    });
 
     if (enrolled) {
-      progress = calculateProgress(currentUserId, course.id, false, false);
+      progress = calculateProgress({
+        userId: currentUserId,
+        courseId: course.id,
+        includeQuizzes: false,
+        weightByDuration: false,
+      });
 
-      const progressRecords = getLessonProgressForCourse(
-        currentUserId,
-        course.id
-      );
+      const progressRecords = getLessonProgressForCourse({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
 
-      const nextLesson = getNextIncompleteLesson(currentUserId, course.id);
+      const nextLesson = getNextIncompleteLesson({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       nextLessonId = nextLesson?.id ?? null;
 
-      const existingRating = getUserRating(currentUserId, course.id);
+      const existingRating = getUserRating({
+        userId: currentUserId,
+        courseId: course.id,
+      });
       userRating = existingRating?.rating ?? null;
     }
   }
@@ -171,16 +185,23 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   // Bookmarking is a wishlist action — available to any signed-in user.
   if (parsed.data.intent === "toggle-bookmark") {
-    const { bookmarked } = toggleCourseBookmark(currentUserId, course.id);
+    const { bookmarked } = toggleCourseBookmark({
+      userId: currentUserId,
+      courseId: course.id,
+    });
     return { bookmarked };
   }
 
   // Ratings require enrollment.
-  if (!isUserEnrolled(currentUserId, course.id)) {
+  if (!isUserEnrolled({ userId: currentUserId, courseId: course.id })) {
     throw data("You must be enrolled to rate this course", { status: 403 });
   }
 
-  rateCourse(currentUserId, course.id, parsed.data.rating);
+  rateCourse({
+    userId: currentUserId,
+    courseId: course.id,
+    rating: parsed.data.rating,
+  });
   return { success: true };
 }
 

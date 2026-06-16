@@ -11,7 +11,7 @@ import {
 
 // ─── Quiz Service ───
 // Handles quiz CRUD, question/option management, and attempt recording.
-// Uses positional parameters (project convention).
+// Functions with multiple same-typed params take a single object param.
 
 // ─── Quiz CRUD ───
 
@@ -46,14 +46,18 @@ export function getQuizWithQuestions(quizId: number) {
   return { ...quiz, questions: questionsWithOptions };
 }
 
-export function createQuiz(
-  lessonId: number,
-  title: string,
-  passingScore: number
-) {
+export function createQuiz(opts: {
+  lessonId: number;
+  title: string;
+  passingScore: number;
+}) {
   return db
     .insert(quizzes)
-    .values({ lessonId, title, passingScore })
+    .values({
+      lessonId: opts.lessonId,
+      title: opts.title,
+      passingScore: opts.passingScore,
+    })
     .returning()
     .get();
 }
@@ -180,10 +184,11 @@ export function deleteQuestion(id: number) {
 
 // ─── Question Reordering ───
 
-export function moveQuestionToPosition(
-  questionId: number,
-  newPosition: number
-) {
+export function moveQuestionToPosition(opts: {
+  questionId: number;
+  newPosition: number;
+}) {
+  const { questionId, newPosition } = opts;
   const question = getQuestionById(questionId);
   if (!question) return null;
 
@@ -294,12 +299,15 @@ export function getAttemptById(id: number) {
   return db.select().from(quizAttempts).where(eq(quizAttempts.id, id)).get();
 }
 
-export function getAttemptsByUser(userId: number, quizId: number) {
+export function getAttemptsByUser(opts: { userId: number; quizId: number }) {
   return db
     .select()
     .from(quizAttempts)
     .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.quizId, quizId))
+      and(
+        eq(quizAttempts.userId, opts.userId),
+        eq(quizAttempts.quizId, opts.quizId)
+      )
     )
     .orderBy(desc(quizAttempts.attemptedAt))
     .all();
@@ -314,51 +322,66 @@ export function getAttemptCountForQuiz(quizId: number) {
   return result?.count ?? 0;
 }
 
-export function getBestAttempt(userId: number, quizId: number) {
+export function getBestAttempt(opts: { userId: number; quizId: number }) {
   return db
     .select()
     .from(quizAttempts)
     .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.quizId, quizId))
+      and(
+        eq(quizAttempts.userId, opts.userId),
+        eq(quizAttempts.quizId, opts.quizId)
+      )
     )
     .orderBy(desc(quizAttempts.score))
     .limit(1)
     .get();
 }
 
-export function getLatestAttempt(userId: number, quizId: number) {
+export function getLatestAttempt(opts: { userId: number; quizId: number }) {
   return db
     .select()
     .from(quizAttempts)
     .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.quizId, quizId))
+      and(
+        eq(quizAttempts.userId, opts.userId),
+        eq(quizAttempts.quizId, opts.quizId)
+      )
     )
     .orderBy(desc(quizAttempts.attemptedAt))
     .limit(1)
     .get();
 }
 
-export function recordAttempt(
-  userId: number,
-  quizId: number,
-  score: number,
-  passed: boolean
-) {
+export function recordAttempt(opts: {
+  userId: number;
+  quizId: number;
+  score: number;
+  passed: boolean;
+}) {
   return db
     .insert(quizAttempts)
-    .values({ userId, quizId, score, passed })
+    .values({
+      userId: opts.userId,
+      quizId: opts.quizId,
+      score: opts.score,
+      passed: opts.passed,
+    })
     .returning()
     .get();
 }
 
-export function recordAnswer(
-  attemptId: number,
-  questionId: number,
-  selectedOptionId: number
-) {
+export function recordAnswer(opts: {
+  attemptId: number;
+  questionId: number;
+  selectedOptionId: number;
+}) {
   return db
     .insert(quizAnswers)
-    .values({ attemptId, questionId, selectedOptionId })
+    .values({
+      attemptId: opts.attemptId,
+      questionId: opts.questionId,
+      selectedOptionId: opts.selectedOptionId,
+    })
     .returning()
     .get();
 }
