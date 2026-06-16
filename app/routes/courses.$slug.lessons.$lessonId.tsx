@@ -65,6 +65,11 @@ import { UserAvatar } from "~/components/user-avatar";
 import { Textarea } from "~/components/ui/textarea";
 import { MessageSquare, Reply, Trash2 } from "lucide-react";
 import { parseFormData, parseParams } from "~/lib/validation";
+import {
+  isLessonBookmarked,
+  toggleLessonBookmark,
+} from "~/services/bookmarkService";
+import { BookmarkButton } from "~/components/bookmark-button";
 
 const lessonParamsSchema = z.object({
   slug: z.string().min(1),
@@ -148,9 +153,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lastWatchPosition = 0;
   let watchProgress = 0;
   let lessonProgressMap: Record<number, string> = {};
+  let isBookmarked = false;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
+    isBookmarked = isLessonBookmarked(currentUserId, lessonId);
 
     if (enrolled) {
       // Mark lesson as in-progress when viewed
@@ -306,6 +313,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     comments,
     canComment,
     isInstructor,
+    isBookmarked,
   };
 }
 
@@ -407,6 +415,20 @@ export async function action({ params, request }: Route.ActionArgs) {
     return { commentSuccess: true };
   }
 
+  if (intent === "toggle-bookmark") {
+    // You can only reach a lesson if you own the course (or teach it).
+    const isInstructor = course.instructorId === currentUserId;
+    const enrolled = isUserEnrolled(currentUserId, course.id);
+    if (!isInstructor && !enrolled) {
+      throw data("You must be enrolled to bookmark this lesson", {
+        status: 403,
+      });
+    }
+
+    const { bookmarked } = toggleLessonBookmark(currentUserId, lessonId);
+    return { bookmarked };
+  }
+
   throw data("Invalid action", { status: 400 });
 }
 
@@ -461,6 +483,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     comments,
     canComment,
     isInstructor,
+    isBookmarked,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
@@ -580,6 +603,9 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
                   Open Code
                 </Button>
               </a>
+            )}
+            {enrolled && currentUserId && (
+              <BookmarkButton isBookmarked={isBookmarked} size="sm" />
             )}
           </div>
 

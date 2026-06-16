@@ -50,6 +50,11 @@ import {
   getUserRating,
   rateCourse,
 } from "~/services/ratingService";
+import {
+  isCourseBookmarked,
+  toggleCourseBookmark,
+} from "~/services/bookmarkService";
+import { BookmarkButton } from "~/components/bookmark-button";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Course";
@@ -80,9 +85,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lessonProgressMap: Record<number, string> = {};
   let nextLessonId: number | null = null;
   let userRating: number | null = null;
+  let isBookmarked = false;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
+    isBookmarked = isCourseBookmarked(currentUserId, course.id);
 
     if (enrolled) {
       progress = calculateProgress(currentUserId, course.id, false, false);
@@ -132,14 +139,16 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     averageRating,
     ratingCount,
     userRating,
+    isBookmarked,
   };
 }
 
-const rateActionSchema = z.discriminatedUnion("intent", [
+const courseActionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("rate-course"),
     rating: z.coerce.number().int().min(1).max(5),
   }),
+  z.object({ intent: z.literal("toggle-bookmark") }),
 ]);
 
 export async function action({ params, request }: Route.ActionArgs) {
@@ -153,15 +162,22 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("Course not found", { status: 404 });
   }
 
-  if (!isUserEnrolled(currentUserId, course.id)) {
-    throw data("You must be enrolled to rate this course", { status: 403 });
-  }
-
   const formData = await request.formData();
-  const parsed = parseFormData(formData, rateActionSchema);
+  const parsed = parseFormData(formData, courseActionSchema);
 
   if (!parsed.success) {
-    throw data("Invalid rating", { status: 400 });
+    throw data("Invalid action", { status: 400 });
+  }
+
+  // Bookmarking is a wishlist action — available to any signed-in user.
+  if (parsed.data.intent === "toggle-bookmark") {
+    const { bookmarked } = toggleCourseBookmark(currentUserId, course.id);
+    return { bookmarked };
+  }
+
+  // Ratings require enrollment.
+  if (!isUserEnrolled(currentUserId, course.id)) {
+    throw data("You must be enrolled to rate this course", { status: 403 });
   }
 
   rateCourse(currentUserId, course.id, parsed.data.rating);
@@ -234,6 +250,7 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     averageRating,
     ratingCount,
     userRating,
+    isBookmarked,
   } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -342,14 +359,19 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
         </div>
         <div className="mb-3 flex items-start justify-between gap-4">
           <h1 className="text-4xl font-bold">{course.title}</h1>
-          {currentUserId === course.instructorId && (
-            <Link to={`/instructor/${course.id}`}>
-              <Button variant="outline" size="sm" className="shrink-0">
-                <Pencil className="mr-1.5 size-3.5" />
-                Edit Course
-              </Button>
-            </Link>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {currentUserId && !isInstructor && (
+              <BookmarkButton isBookmarked={isBookmarked} size="sm" />
+            )}
+            {isInstructor && (
+              <Link to={`/instructor/${course.id}`}>
+                <Button variant="outline" size="sm">
+                  <Pencil className="mr-1.5 size-3.5" />
+                  Edit Course
+                </Button>
+              </Link>
+            )}
+          </div>
         </div>
         <p className="mb-4 text-lg text-muted-foreground">
           {course.description}

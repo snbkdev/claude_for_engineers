@@ -282,6 +282,20 @@ export const lessonComments = sqliteTable("lesson_comments", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Bookmarks let a user save a course (wishlist) or a lesson to return to later.
+// Exactly one of courseId / lessonId is set per row (enforced in the service).
+export const bookmarks = sqliteTable("bookmarks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  courseId: integer("course_id").references(() => courses.id),
+  lessonId: integer("lesson_id").references(() => lessons.id),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const courseRatings = sqliteTable("course_ratings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
