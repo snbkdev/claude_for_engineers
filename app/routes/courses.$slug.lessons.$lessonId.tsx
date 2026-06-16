@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
@@ -26,7 +26,7 @@ import {
   getBestAttempt,
 } from "~/services/quizService";
 import { computeResult } from "~/services/quizScoringService";
-import { LessonProgressStatus } from "~/db/schema";
+import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -54,6 +54,16 @@ import { z } from "zod";
 import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
 import { findPurchase } from "~/services/purchaseService";
+import {
+  getCommentsForLesson,
+  buildCommentTree,
+  createComment,
+  deleteComment,
+  getCommentById,
+} from "~/services/commentService";
+import { UserAvatar } from "~/components/user-avatar";
+import { Textarea } from "~/components/ui/textarea";
+import { MessageSquare, Reply, Trash2 } from "lucide-react";
 import { parseFormData, parseParams } from "~/lib/validation";
 
 const lessonParamsSchema = z.object({
@@ -191,6 +201,18 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     pppPurchaseCountry = pppResult.purchaseCountry;
   }
 
+  // Comments: students who own the course (or the instructor) take part in the
+  // lesson discussion. Students post comments; the instructor replies.
+  const isInstructor =
+    currentUserId != null && course.instructorId === currentUserId;
+  const hasPurchased =
+    currentUserId != null && !!findPurchase(currentUserId, course.id);
+  const canComment = isInstructor || hasPurchased;
+
+  const comments = canComment
+    ? buildCommentTree(getCommentsForLesson(lessonId))
+    : [];
+
   // Render lesson content from Markdown to HTML server-side
   const contentHtml = lesson.content
     ? await renderMarkdown(lesson.content)
@@ -281,6 +303,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     pppBlocked,
     pppBlockedCountry,
     pppPurchaseCountry,
+    comments,
+    canComment,
+    isInstructor,
   };
 }
 
@@ -329,6 +354,57 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
 
     return { quizResult: result };
+  }
+
+  if (intent === "add-comment") {
+    const isInstructor = course.instructorId === currentUserId;
+    const hasPurchased = !!findPurchase(currentUserId, course.id);
+    if (!isInstructor && !hasPurchased) {
+      throw data("You must own this course to comment", { status: 403 });
+    }
+
+    const content = String(formData.get("content") ?? "");
+    const parentIdRaw = formData.get("parentId");
+    let parentId: number | null = null;
+    if (parentIdRaw != null && parentIdRaw !== "") {
+      parentId = Number(parentIdRaw);
+      if (isNaN(parentId)) {
+        throw data("Invalid parent comment", { status: 400 });
+      }
+    }
+
+    // Replies are the instructor's tool for answering students.
+    if (parentId !== null && !isInstructor) {
+      throw data("Only the instructor can reply to comments", { status: 403 });
+    }
+
+    if (!content.trim()) {
+      return { commentError: "Comment cannot be empty" };
+    }
+
+    createComment(currentUserId, lessonId, content, parentId);
+    return { commentSuccess: true };
+  }
+
+  if (intent === "delete-comment") {
+    const commentId = Number(formData.get("commentId"));
+    if (isNaN(commentId)) {
+      throw data("Invalid comment", { status: 400 });
+    }
+
+    const comment = getCommentById(commentId);
+    if (!comment || comment.lessonId !== lessonId) {
+      throw data("Comment not found", { status: 404 });
+    }
+
+    // Only the author may remove their own comment — instructors cannot
+    // delete or edit students' comments.
+    if (comment.userId !== currentUserId) {
+      throw data("You cannot delete this comment", { status: 403 });
+    }
+
+    deleteComment(commentId);
+    return { commentSuccess: true };
   }
 
   throw data("Invalid action", { status: 400 });
@@ -382,6 +458,9 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     pppBlocked,
     pppBlockedCountry,
     pppPurchaseCountry,
+    comments,
+    canComment,
+    isInstructor,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
@@ -590,6 +669,15 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
                 </fetcher.Form>
               )}
             </div>
+          )}
+
+          {/* Lesson Discussion */}
+          {canComment && (
+            <CommentsSection
+              comments={comments}
+              isInstructor={isInstructor}
+              currentUserId={currentUserId}
+            />
           )}
 
           {/* Prev/Next Navigation */}
@@ -1011,6 +1099,236 @@ function QuizSection({
         </quizFetcher.Form>
       </CardContent>
     </Card>
+  );
+}
+
+function formatCommentDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+type CommentData = {
+  id: number;
+  userId: number;
+  parentId: number | null;
+  content: string;
+  createdAt: string;
+  userName: string;
+  userAvatarUrl: string | null;
+  userRole: string;
+};
+type CommentNode = CommentData & { replies: CommentData[] };
+
+function CommentsSection({
+  comments,
+  isInstructor,
+  currentUserId,
+}: {
+  comments: CommentNode[];
+  isInstructor: boolean;
+  currentUserId: number | null;
+}) {
+  const fetcher = useFetcher<{
+    commentSuccess?: boolean;
+    commentError?: string;
+  }>();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.commentSuccess) {
+      formRef.current?.reset();
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  useEffect(() => {
+    if (fetcher.data?.commentError) {
+      toast.error(fetcher.data.commentError);
+    }
+  }, [fetcher.data]);
+
+  const isPosting = fetcher.state !== "idle";
+  const totalCount = comments.reduce(
+    (sum, c) => sum + 1 + c.replies.length,
+    0
+  );
+
+  return (
+    <section className="mb-8 border-t pt-8">
+      <div className="mb-6 flex items-center gap-2">
+        <MessageSquare className="size-5 text-primary" />
+        <h2 className="text-xl font-semibold">Discussion</h2>
+        <span className="text-sm text-muted-foreground">({totalCount})</span>
+      </div>
+
+      <fetcher.Form ref={formRef} method="post" className="mb-8">
+        <input type="hidden" name="intent" value="add-comment" />
+        <Textarea
+          name="content"
+          placeholder="Ask a question or share a thought about this lesson..."
+          required
+          rows={3}
+          className="mb-3"
+        />
+        <Button type="submit" disabled={isPosting}>
+          {isPosting ? "Posting..." : "Post comment"}
+        </Button>
+      </fetcher.Form>
+
+      {comments.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No comments yet. Be the first to start the discussion.
+        </p>
+      ) : (
+        <ul className="space-y-6">
+          {comments.map((comment) => (
+            <CommentItem
+              key={comment.id}
+              comment={comment}
+              isInstructor={isInstructor}
+              currentUserId={currentUserId}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CommentItem({
+  comment,
+  isInstructor,
+  currentUserId,
+}: {
+  comment: CommentNode;
+  isInstructor: boolean;
+  currentUserId: number | null;
+}) {
+  const [showReply, setShowReply] = useState(false);
+  const replyFetcher = useFetcher<{ commentSuccess?: boolean }>();
+  const replyFormRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (replyFetcher.state === "idle" && replyFetcher.data?.commentSuccess) {
+      replyFormRef.current?.reset();
+      setShowReply(false);
+    }
+  }, [replyFetcher.state, replyFetcher.data]);
+
+  const isReplying = replyFetcher.state !== "idle";
+
+  return (
+    <li>
+      <CommentBody comment={comment} currentUserId={currentUserId} />
+
+      {/* Only the instructor can reply to a comment */}
+      {isInstructor && (
+        <div className="ml-11 mt-2">
+          {!showReply ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowReply(true)}
+            >
+              <Reply className="mr-1.5 size-3.5" />
+              Reply
+            </Button>
+          ) : (
+            <replyFetcher.Form ref={replyFormRef} method="post" className="mt-2">
+              <input type="hidden" name="intent" value="add-comment" />
+              <input type="hidden" name="parentId" value={comment.id} />
+              <Textarea
+                name="content"
+                placeholder="Write a reply..."
+                required
+                rows={2}
+                className="mb-2"
+              />
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={isReplying}>
+                  {isReplying ? "Replying..." : "Post reply"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowReply(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </replyFetcher.Form>
+          )}
+        </div>
+      )}
+
+      {comment.replies.length > 0 && (
+        <ul className="ml-11 mt-4 space-y-4 border-l pl-4">
+          {comment.replies.map((reply) => (
+            <li key={reply.id}>
+              <CommentBody comment={reply} currentUserId={currentUserId} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function CommentBody({
+  comment,
+  currentUserId,
+}: {
+  comment: CommentData;
+  currentUserId: number | null;
+}) {
+  const deleteFetcher = useFetcher();
+  const canDelete = comment.userId === currentUserId;
+  const isAuthorInstructor = comment.userRole === UserRole.Instructor;
+  const isDeleting = deleteFetcher.state !== "idle";
+
+  return (
+    <div className={cn("flex gap-3", isDeleting && "opacity-50")}>
+      <UserAvatar
+        name={comment.userName}
+        avatarUrl={comment.userAvatarUrl}
+        className="size-8 shrink-0"
+      />
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{comment.userName}</span>
+          {isAuthorInstructor && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              Instructor
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">
+            {formatCommentDate(comment.createdAt)}
+          </span>
+          {canDelete && (
+            <deleteFetcher.Form method="post" className="ml-auto">
+              <input type="hidden" name="intent" value="delete-comment" />
+              <input type="hidden" name="commentId" value={comment.id} />
+              <button
+                type="submit"
+                disabled={isDeleting}
+                title="Delete comment"
+                className="text-muted-foreground transition-colors hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </deleteFetcher.Form>
+          )}
+        </div>
+        <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">
+          {comment.content}
+        </p>
+      </div>
+    </div>
   );
 }
 
