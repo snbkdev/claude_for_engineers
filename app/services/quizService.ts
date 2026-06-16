@@ -80,12 +80,8 @@ export function updateQuiz(
 }
 
 export function deleteQuiz(id: number) {
-  // Cascade: delete answers -> attempts -> options -> questions -> quiz
-  const questions = getQuestionsByQuiz(id);
-  for (const question of questions) {
-    db.delete(quizOptions).where(eq(quizOptions.questionId, question.id)).run();
-  }
-
+  // Cascade order matters: answers reference options (selectedOptionId), so
+  // delete answers -> attempts before options -> questions -> quiz.
   const attempts = db
     .select()
     .from(quizAttempts)
@@ -94,9 +90,14 @@ export function deleteQuiz(id: number) {
   for (const attempt of attempts) {
     db.delete(quizAnswers).where(eq(quizAnswers.attemptId, attempt.id)).run();
   }
-
   db.delete(quizAttempts).where(eq(quizAttempts.quizId, id)).run();
+
+  const questions = getQuestionsByQuiz(id);
+  for (const question of questions) {
+    db.delete(quizOptions).where(eq(quizOptions.questionId, question.id)).run();
+  }
   db.delete(quizQuestions).where(eq(quizQuestions.quizId, id)).run();
+
   return db.delete(quizzes).where(eq(quizzes.id, id)).returning().get();
 }
 
