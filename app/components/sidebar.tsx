@@ -5,7 +5,6 @@ import { UserRole } from "~/db/schema";
 import { UserAvatar } from "~/components/user-avatar";
 import {
   BookOpen,
-  Bookmark,
   LayoutDashboard,
   GraduationCap,
   Shield,
@@ -59,12 +58,6 @@ const navItems: NavItem[] = [
     label: "Dashboard",
     to: "/dashboard",
     icon: <LayoutDashboard className="size-4" />,
-    roles: [UserRole.Student],
-  },
-  {
-    label: "Bookmarks",
-    to: "/bookmarks",
-    icon: <Bookmark className="size-4" />,
     roles: [UserRole.Student],
   },
   {

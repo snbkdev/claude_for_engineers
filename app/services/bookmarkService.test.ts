@@ -12,25 +12,23 @@ vi.mock("~/db", () => ({
 }));
 
 import {
-  isCourseBookmarked,
+  toggleBookmark,
   isLessonBookmarked,
-  toggleCourseBookmark,
-  toggleLessonBookmark,
-  removeCourseBookmark,
-  getBookmarkedCourses,
-  getBookmarkedLessons,
+  getBookmarkedLessonIds,
 } from "./bookmarkService";
 
-function seedLesson() {
-  const mod = testDb
+function seedModule(courseId: number, title = "Module 1") {
+  return testDb
     .insert(schema.modules)
-    .values({ courseId: base.course.id, title: "Module 1", position: 0 })
+    .values({ courseId, title, position: 0 })
     .returning()
     .get();
+}
 
+function seedLesson(moduleId: number, title = "Lesson 1", position = 0) {
   return testDb
     .insert(schema.lessons)
-    .values({ moduleId: mod.id, title: "Lesson 1", position: 0 })
+    .values({ moduleId, title, position })
     .returning()
     .get();
 }
@@ -41,73 +39,111 @@ describe("bookmarkService", () => {
     base = seedBaseData(testDb);
   });
 
-  describe("course bookmarks", () => {
-    it("toggles a course bookmark on and off", () => {
-      expect(isCourseBookmarked(base.user.id, base.course.id)).toBe(false);
+  describe("toggleBookmark", () => {
+    it("adds a bookmark when none exists", () => {
+      const lesson = seedLesson(seedModule(base.course.id).id);
 
-      const added = toggleCourseBookmark(base.user.id, base.course.id);
-      expect(added.bookmarked).toBe(true);
-      expect(isCourseBookmarked(base.user.id, base.course.id)).toBe(true);
+      const result = toggleBookmark({
+        userId: base.user.id,
+        lessonId: lesson.id,
+      });
 
-      const removed = toggleCourseBookmark(base.user.id, base.course.id);
-      expect(removed.bookmarked).toBe(false);
-      expect(isCourseBookmarked(base.user.id, base.course.id)).toBe(false);
+      expect(result).toEqual({ bookmarked: true });
+      expect(
+        isLessonBookmarked({ userId: base.user.id, lessonId: lesson.id })
+      ).toBe(true);
     });
 
-    it("scopes bookmarks per user", () => {
-      toggleCourseBookmark(base.user.id, base.course.id);
-      expect(isCourseBookmarked(base.instructor.id, base.course.id)).toBe(false);
-    });
+    it("removes the bookmark when one already exists", () => {
+      const lesson = seedLesson(seedModule(base.course.id).id);
 
-    it("removeCourseBookmark is a no-op when nothing is bookmarked", () => {
-      expect(() =>
-        removeCourseBookmark(base.user.id, base.course.id)
-      ).not.toThrow();
-      expect(isCourseBookmarked(base.user.id, base.course.id)).toBe(false);
-    });
-  });
+      toggleBookmark({ userId: base.user.id, lessonId: lesson.id });
+      const result = toggleBookmark({
+        userId: base.user.id,
+        lessonId: lesson.id,
+      });
 
-  describe("lesson bookmarks", () => {
-    it("toggles a lesson bookmark on and off", () => {
-      const lesson = seedLesson();
-      expect(isLessonBookmarked(base.user.id, lesson.id)).toBe(false);
-
-      expect(toggleLessonBookmark(base.user.id, lesson.id).bookmarked).toBe(
-        true
-      );
-      expect(isLessonBookmarked(base.user.id, lesson.id)).toBe(true);
-
-      expect(toggleLessonBookmark(base.user.id, lesson.id).bookmarked).toBe(
-        false
-      );
-      expect(isLessonBookmarked(base.user.id, lesson.id)).toBe(false);
+      expect(result).toEqual({ bookmarked: false });
+      expect(
+        isLessonBookmarked({ userId: base.user.id, lessonId: lesson.id })
+      ).toBe(false);
     });
   });
 
-  describe("listing", () => {
-    it("getBookmarkedCourses returns only course bookmarks with details", () => {
-      const lesson = seedLesson();
-      toggleCourseBookmark(base.user.id, base.course.id);
-      toggleLessonBookmark(base.user.id, lesson.id);
-
-      const rows = getBookmarkedCourses(base.user.id);
-      expect(rows).toHaveLength(1);
-      expect(rows[0].courseId).toBe(base.course.id);
-      expect(rows[0].courseTitle).toBe(base.course.title);
-      expect(rows[0].instructorName).toBe(base.instructor.name);
+  describe("isLessonBookmarked", () => {
+    it("returns false for a lesson the user has not bookmarked", () => {
+      const lesson = seedLesson(seedModule(base.course.id).id);
+      expect(
+        isLessonBookmarked({ userId: base.user.id, lessonId: lesson.id })
+      ).toBe(false);
     });
 
-    it("getBookmarkedLessons returns only lesson bookmarks with course context", () => {
-      const lesson = seedLesson();
-      toggleCourseBookmark(base.user.id, base.course.id);
-      toggleLessonBookmark(base.user.id, lesson.id);
+    it("is scoped per user", () => {
+      const lesson = seedLesson(seedModule(base.course.id).id);
+      toggleBookmark({ userId: base.user.id, lessonId: lesson.id });
 
-      const rows = getBookmarkedLessons(base.user.id);
-      expect(rows).toHaveLength(1);
-      expect(rows[0].lessonId).toBe(lesson.id);
-      expect(rows[0].lessonTitle).toBe(lesson.title);
-      expect(rows[0].courseSlug).toBe(base.course.slug);
-      expect(rows[0].moduleTitle).toBe("Module 1");
+      expect(
+        isLessonBookmarked({ userId: base.instructor.id, lessonId: lesson.id })
+      ).toBe(false);
+    });
+  });
+
+  describe("getBookmarkedLessonIds", () => {
+    it("returns the IDs of bookmarked lessons in the course", () => {
+      const mod = seedModule(base.course.id);
+      const lesson1 = seedLesson(mod.id, "Lesson 1", 0);
+      const lesson2 = seedLesson(mod.id, "Lesson 2", 1);
+      seedLesson(mod.id, "Lesson 3", 2); // left unbookmarked
+
+      toggleBookmark({ userId: base.user.id, lessonId: lesson1.id });
+      toggleBookmark({ userId: base.user.id, lessonId: lesson2.id });
+
+      const ids = getBookmarkedLessonIds({
+        userId: base.user.id,
+        courseId: base.course.id,
+      });
+
+      expect(ids.sort()).toEqual([lesson1.id, lesson2.id].sort());
+    });
+
+    it("does not include bookmarks from other courses", () => {
+      const otherCourse = testDb
+        .insert(schema.courses)
+        .values({
+          title: "Other Course",
+          slug: "other-course",
+          description: "Another course",
+          instructorId: base.instructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+        })
+        .returning()
+        .get();
+
+      const lessonInCourse = seedLesson(seedModule(base.course.id).id);
+      const lessonInOther = seedLesson(seedModule(otherCourse.id).id);
+
+      toggleBookmark({ userId: base.user.id, lessonId: lessonInCourse.id });
+      toggleBookmark({ userId: base.user.id, lessonId: lessonInOther.id });
+
+      const ids = getBookmarkedLessonIds({
+        userId: base.user.id,
+        courseId: base.course.id,
+      });
+
+      expect(ids).toEqual([lessonInCourse.id]);
+    });
+
+    it("does not include other users' bookmarks", () => {
+      const lesson = seedLesson(seedModule(base.course.id).id);
+      toggleBookmark({ userId: base.instructor.id, lessonId: lesson.id });
+
+      const ids = getBookmarkedLessonIds({
+        userId: base.user.id,
+        courseId: base.course.id,
+      });
+
+      expect(ids).toEqual([]);
     });
   });
 });

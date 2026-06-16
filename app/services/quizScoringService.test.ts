@@ -84,7 +84,7 @@ describe("quizScoringService", () => {
 
   describe("renderQuizResults", () => {
     it("computes percentage, grade and a passing message", () => {
-      const result = renderQuizResults(8, 10, true, true, false);
+      const result = renderQuizResults({ score: 8, total: 10, passed: true, showAnswers: true, showExplanations: false });
       expect(result.percentage).toBe(0.8);
       expect(result.grade).toBe("B");
       expect(result.passed).toBe(true);
@@ -94,7 +94,7 @@ describe("quizScoringService", () => {
     });
 
     it("returns a failing message when not passed", () => {
-      const result = renderQuizResults(3, 10, false, false, false);
+      const result = renderQuizResults({ score: 3, total: 10, passed: false, showAnswers: false, showExplanations: false });
       expect(result.passed).toBe(false);
       expect(result.message).toMatch(/did not pass/i);
     });
@@ -106,10 +106,10 @@ describe("quizScoringService", () => {
       const q1 = seedMCQuestion(quiz.id, 1);
       const q2 = seedMCQuestion(quiz.id, 2);
 
-      const result = getScore(quiz.id, [
+      const result = getScore({ quizId: quiz.id, answers: [
         { questionId: q1.question.id, selectedOptionId: q1.correct.id },
         { questionId: q2.question.id, selectedOptionId: q2.correct.id },
-      ]);
+      ] });
 
       expect(result.totalCorrect).toBe(2);
       expect(result.totalQuestions).toBe(2);
@@ -123,10 +123,10 @@ describe("quizScoringService", () => {
       const q1 = seedMCQuestion(quiz.id, 1);
       const q2 = seedMCQuestion(quiz.id, 2);
 
-      const result = getScore(quiz.id, [
+      const result = getScore({ quizId: quiz.id, answers: [
         { questionId: q1.question.id, selectedOptionId: q1.correct.id },
         { questionId: q2.question.id, selectedOptionId: q2.wrong.id },
-      ]);
+      ] });
 
       expect(result.score).toBe(0.5);
       expect(result.passed).toBe(false);
@@ -134,7 +134,7 @@ describe("quizScoringService", () => {
     });
 
     it("returns a failing default when the quiz is missing", () => {
-      const result = getScore(999, []);
+      const result = getScore({ quizId: 999, answers: [] });
       expect(result).toEqual({ score: 0, passed: false, grade: "F" });
     });
   });
@@ -145,10 +145,10 @@ describe("quizScoringService", () => {
       const q1 = seedMCQuestion(quiz.id, 1);
       const q2 = seedMCQuestion(quiz.id, 2);
 
-      const result = computeResult(base.user.id, quiz.id, {
+      const result = computeResult({ userId: base.user.id, quizId: quiz.id, selectedAnswers: {
         [q1.question.id]: q1.correct.id,
         [q2.question.id]: q2.correct.id,
-      })!;
+      } })!;
 
       expect(result.attemptId).toBeDefined();
       expect(result.score).toBe(1);
@@ -178,9 +178,9 @@ describe("quizScoringService", () => {
       const q1 = seedMCQuestion(quiz.id, 1);
       const q2 = seedMCQuestion(quiz.id, 2);
 
-      const result = computeResult(base.user.id, quiz.id, {
+      const result = computeResult({ userId: base.user.id, quizId: quiz.id, selectedAnswers: {
         [q1.question.id]: q1.correct.id,
-      })!;
+      } })!;
 
       expect(result.score).toBe(0.5);
       expect(result.passed).toBe(false);
@@ -192,7 +192,7 @@ describe("quizScoringService", () => {
     });
 
     it("returns null when the quiz does not exist", () => {
-      expect(computeResult(base.user.id, 999, {})).toBeNull();
+      expect(computeResult({ userId: base.user.id, quizId: 999, selectedAnswers: {} })).toBeNull();
     });
   });
 });

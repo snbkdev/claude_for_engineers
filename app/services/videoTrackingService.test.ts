@@ -67,20 +67,20 @@ describe("videoTrackingService", () => {
   describe("logWatchEvent + reads", () => {
     it("logs an event and counts it", () => {
       const lesson = seedLesson();
-      logWatchEvent(base.user.id, lesson.id, "play", 0);
-      logWatchEvent(base.user.id, lesson.id, "progress", 30);
+      logWatchEvent({ userId: base.user.id, lessonId: lesson.id, eventType: "play", positionSeconds: 0 });
+      logWatchEvent({ userId: base.user.id, lessonId: lesson.id, eventType: "progress", positionSeconds: 30 });
 
-      expect(getWatchEventCount(base.user.id, lesson.id)).toBe(2);
-      expect(getWatchEvents(base.user.id, lesson.id)).toHaveLength(2);
-      expect(hasUserWatchedVideo(base.user.id, lesson.id)).toBe(true);
+      expect(getWatchEventCount({ userId: base.user.id, lessonId: lesson.id })).toBe(2);
+      expect(getWatchEvents({ userId: base.user.id, lessonId: lesson.id })).toHaveLength(2);
+      expect(hasUserWatchedVideo({ userId: base.user.id, lessonId: lesson.id })).toBe(true);
     });
 
     it("reports no watch history for an untouched lesson", () => {
       const lesson = seedLesson();
-      expect(getWatchEventCount(base.user.id, lesson.id)).toBe(0);
-      expect(hasUserWatchedVideo(base.user.id, lesson.id)).toBe(false);
-      expect(getLastWatchPosition(base.user.id, lesson.id)).toBe(0);
-      expect(getMaxWatchPosition(base.user.id, lesson.id)).toBe(0);
+      expect(getWatchEventCount({ userId: base.user.id, lessonId: lesson.id })).toBe(0);
+      expect(hasUserWatchedVideo({ userId: base.user.id, lessonId: lesson.id })).toBe(false);
+      expect(getLastWatchPosition({ userId: base.user.id, lessonId: lesson.id })).toBe(0);
+      expect(getMaxWatchPosition({ userId: base.user.id, lessonId: lesson.id })).toBe(0);
     });
   });
 
@@ -91,7 +91,7 @@ describe("videoTrackingService", () => {
       seedEvent(base.user.id, lesson.id, 45, "2024-01-02T00:00:00.000Z");
 
       // Latest by createdAt is the 45s event, even though it's a lower position.
-      expect(getLastWatchPosition(base.user.id, lesson.id)).toBe(45);
+      expect(getLastWatchPosition({ userId: base.user.id, lessonId: lesson.id })).toBe(45);
     });
 
     it("getMaxWatchPosition returns the furthest position reached", () => {
@@ -99,26 +99,26 @@ describe("videoTrackingService", () => {
       seedEvent(base.user.id, lesson.id, 120, "2024-01-01T00:00:00.000Z");
       seedEvent(base.user.id, lesson.id, 45, "2024-01-02T00:00:00.000Z");
 
-      expect(getMaxWatchPosition(base.user.id, lesson.id)).toBe(120);
+      expect(getMaxWatchPosition({ userId: base.user.id, lessonId: lesson.id })).toBe(120);
     });
   });
 
   describe("calculateWatchProgress", () => {
     it("returns 0 for non-positive duration", () => {
       const lesson = seedLesson();
-      expect(calculateWatchProgress(base.user.id, lesson.id, 0)).toBe(0);
+      expect(calculateWatchProgress({ userId: base.user.id, lessonId: lesson.id, videoDurationSeconds: 0 })).toBe(0);
     });
 
     it("computes rounded percentage capped at 100", () => {
       const lesson = seedLesson();
       seedEvent(base.user.id, lesson.id, 75, "2024-01-01T00:00:00.000Z");
-      expect(calculateWatchProgress(base.user.id, lesson.id, 100)).toBe(75);
+      expect(calculateWatchProgress({ userId: base.user.id, lessonId: lesson.id, videoDurationSeconds: 100 })).toBe(75);
     });
 
     it("caps progress at 100 when position exceeds duration", () => {
       const lesson = seedLesson();
       seedEvent(base.user.id, lesson.id, 200, "2024-01-01T00:00:00.000Z");
-      expect(calculateWatchProgress(base.user.id, lesson.id, 100)).toBe(100);
+      expect(calculateWatchProgress({ userId: base.user.id, lessonId: lesson.id, videoDurationSeconds: 100 })).toBe(100);
     });
   });
 
@@ -127,8 +127,8 @@ describe("videoTrackingService", () => {
       const lesson = seedLesson();
       seedEvent(base.user.id, lesson.id, 90, "2024-01-01T00:00:00.000Z");
 
-      expect(hasUserCompletedVideo(base.user.id, lesson.id, 100, 90)).toBe(true);
-      expect(hasUserCompletedVideo(base.user.id, lesson.id, 100, 95)).toBe(
+      expect(hasUserCompletedVideo({ userId: base.user.id, lessonId: lesson.id, videoDurationSeconds: 100, completionThreshold: 90 })).toBe(true);
+      expect(hasUserCompletedVideo({ userId: base.user.id, lessonId: lesson.id, videoDurationSeconds: 100, completionThreshold: 95 })).toBe(
         false
       );
     });
@@ -152,12 +152,12 @@ describe("videoTrackingService", () => {
 
     it("deleteWatchEvents removes a lesson's events", () => {
       const lesson = seedLesson();
-      logWatchEvent(base.user.id, lesson.id, "play", 0);
-      logWatchEvent(base.user.id, lesson.id, "progress", 30);
+      logWatchEvent({ userId: base.user.id, lessonId: lesson.id, eventType: "play", positionSeconds: 0 });
+      logWatchEvent({ userId: base.user.id, lessonId: lesson.id, eventType: "progress", positionSeconds: 30 });
 
-      const deleted = deleteWatchEvents(base.user.id, lesson.id);
+      const deleted = deleteWatchEvents({ userId: base.user.id, lessonId: lesson.id });
       expect(deleted).toHaveLength(2);
-      expect(getWatchEventCount(base.user.id, lesson.id)).toBe(0);
+      expect(getWatchEventCount({ userId: base.user.id, lessonId: lesson.id })).toBe(0);
     });
   });
 });

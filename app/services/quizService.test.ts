@@ -53,7 +53,7 @@ function seedLesson() {
 
 function seedQuiz(passingScore = 0.7) {
   const lesson = seedLesson();
-  return createQuiz(lesson.id, "Quiz 1", passingScore);
+  return createQuiz({ lessonId: lesson.id, title: "Quiz 1", passingScore });
 }
 
 describe("quizService", () => {
@@ -65,7 +65,7 @@ describe("quizService", () => {
   describe("quiz CRUD", () => {
     it("creates and looks up a quiz by id and lesson", () => {
       const lesson = seedLesson();
-      const quiz = createQuiz(lesson.id, "TS Basics", 0.8);
+      const quiz = createQuiz({ lessonId: lesson.id, title: "TS Basics", passingScore: 0.8 });
 
       expect(getQuizById(quiz.id)?.title).toBe("TS Basics");
       expect(getQuizByLessonId(lesson.id)?.id).toBe(quiz.id);
@@ -110,8 +110,8 @@ describe("quizService", () => {
         null
       );
       const opt = createOption(q.id, "A", true);
-      const attempt = recordAttempt(base.user.id, quiz.id, 1, true);
-      recordAnswer(attempt.id, q.id, opt.id);
+      const attempt = recordAttempt({ userId: base.user.id, quizId: quiz.id, score: 1, passed: true });
+      recordAnswer({ attemptId: attempt.id, questionId: q.id, selectedOptionId: opt.id });
 
       deleteQuiz(quiz.id);
 
@@ -166,7 +166,7 @@ describe("quizService", () => {
       const q3 = createQuestion(quiz.id, "Q3", QuestionType.TrueFalse, null);
 
       // Move Q1 (pos 1) to pos 3 → Q2,Q3 shift down, Q1 last.
-      moveQuestionToPosition(q1.id, 3);
+      moveQuestionToPosition({ questionId: q1.id, newPosition: 3 });
 
       const ordered = getQuestionsByQuiz(quiz.id).map((q) => q.id);
       expect(ordered).toEqual([q2.id, q3.id, q1.id]);
@@ -188,13 +188,13 @@ describe("quizService", () => {
   describe("attempts", () => {
     it("records attempts and finds the highest-scoring one", () => {
       const quiz = seedQuiz();
-      recordAttempt(base.user.id, quiz.id, 0.4, false);
-      recordAttempt(base.user.id, quiz.id, 0.9, true);
-      recordAttempt(base.user.id, quiz.id, 0.6, false);
+      recordAttempt({ userId: base.user.id, quizId: quiz.id, score: 0.4, passed: false });
+      recordAttempt({ userId: base.user.id, quizId: quiz.id, score: 0.9, passed: true });
+      recordAttempt({ userId: base.user.id, quizId: quiz.id, score: 0.6, passed: false });
 
-      expect(getAttemptsByUser(base.user.id, quiz.id)).toHaveLength(3);
+      expect(getAttemptsByUser({ userId: base.user.id, quizId: quiz.id })).toHaveLength(3);
       expect(getAttemptCountForQuiz(quiz.id)).toBe(3);
-      expect(getBestAttempt(base.user.id, quiz.id)?.score).toBe(0.9);
+      expect(getBestAttempt({ userId: base.user.id, quizId: quiz.id })?.score).toBe(0.9);
     });
 
     it("getLatestAttempt returns the most recent attempt by time", () => {
@@ -223,7 +223,7 @@ describe("quizService", () => {
         .returning()
         .get();
 
-      expect(getLatestAttempt(base.user.id, quiz.id)?.id).toBe(newer.id);
+      expect(getLatestAttempt({ userId: base.user.id, quizId: quiz.id })?.id).toBe(newer.id);
     });
 
     it("getAttemptWithAnswers bundles the recorded answers", () => {
@@ -235,8 +235,8 @@ describe("quizService", () => {
         null
       );
       const opt = createOption(q.id, "A", true);
-      const attempt = recordAttempt(base.user.id, quiz.id, 1, true);
-      recordAnswer(attempt.id, q.id, opt.id);
+      const attempt = recordAttempt({ userId: base.user.id, quizId: quiz.id, score: 1, passed: true });
+      recordAnswer({ attemptId: attempt.id, questionId: q.id, selectedOptionId: opt.id });
 
       const bundle = getAttemptWithAnswers(attempt.id)!;
       expect(bundle.answers).toHaveLength(1);

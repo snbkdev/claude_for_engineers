@@ -9,7 +9,6 @@ export default [
   index("routes/home.tsx"),
   layout("routes/layout.app.tsx", [
     route("dashboard", "routes/dashboard.tsx"),
-    route("bookmarks", "routes/bookmarks.tsx"),
     route("courses", "routes/courses.tsx"),
     route("courses/:slug", "routes/courses.$slug.tsx"),
     route("courses/:slug/:moduleId", "routes/courses.$slug.$moduleId.tsx"),

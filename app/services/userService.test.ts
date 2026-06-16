@@ -27,12 +27,7 @@ describe("userService", () => {
 
   describe("createUser", () => {
     it("creates a user with the given fields", () => {
-      const user = createUser(
-        "Ada Lovelace",
-        "ada@example.com",
-        UserRole.Student,
-        null
-      );
+      const user = createUser({ name: "Ada Lovelace", email: "ada@example.com", role: UserRole.Student, avatarUrl: null });
 
       expect(user.id).toBeDefined();
       expect(user.name).toBe("Ada Lovelace");
@@ -42,21 +37,16 @@ describe("userService", () => {
     });
 
     it("rejects a duplicate email (unique constraint)", () => {
-      createUser("First", "dup@example.com", UserRole.Student, null);
+      createUser({ name: "First", email: "dup@example.com", role: UserRole.Student, avatarUrl: null });
       expect(() =>
-        createUser("Second", "dup@example.com", UserRole.Student, null)
+        createUser({ name: "Second", email: "dup@example.com", role: UserRole.Student, avatarUrl: null })
       ).toThrow();
     });
   });
 
   describe("lookups", () => {
     it("finds a user by id and by email", () => {
-      const created = createUser(
-        "Grace Hopper",
-        "grace@example.com",
-        UserRole.Instructor,
-        "https://img/grace.png"
-      );
+      const created = createUser({ name: "Grace Hopper", email: "grace@example.com", role: UserRole.Instructor, avatarUrl: "https://img/grace.png" });
 
       expect(getUserById(created.id)?.email).toBe("grace@example.com");
       expect(getUserByEmail("grace@example.com")?.id).toBe(created.id);
@@ -68,15 +58,15 @@ describe("userService", () => {
     });
 
     it("getAllUsers returns every user", () => {
-      createUser("A", "a@example.com", UserRole.Student, null);
-      createUser("B", "b@example.com", UserRole.Admin, null);
+      createUser({ name: "A", email: "a@example.com", role: UserRole.Student, avatarUrl: null });
+      createUser({ name: "B", email: "b@example.com", role: UserRole.Admin, avatarUrl: null });
       expect(getAllUsers()).toHaveLength(2);
     });
 
     it("getUsersByRole filters by role", () => {
-      createUser("S1", "s1@example.com", UserRole.Student, null);
-      createUser("S2", "s2@example.com", UserRole.Student, null);
-      createUser("I1", "i1@example.com", UserRole.Instructor, null);
+      createUser({ name: "S1", email: "s1@example.com", role: UserRole.Student, avatarUrl: null });
+      createUser({ name: "S2", email: "s2@example.com", role: UserRole.Student, avatarUrl: null });
+      createUser({ name: "I1", email: "i1@example.com", role: UserRole.Instructor, avatarUrl: null });
 
       expect(getUsersByRole(UserRole.Student)).toHaveLength(2);
       expect(getUsersByRole(UserRole.Instructor)).toHaveLength(1);
@@ -86,13 +76,8 @@ describe("userService", () => {
 
   describe("updates", () => {
     it("updateUser changes name, email and bio", () => {
-      const user = createUser("Old", "old@example.com", UserRole.Student, null);
-      const updated = updateUser(
-        user.id,
-        "New Name",
-        "new@example.com",
-        "A short bio"
-      );
+      const user = createUser({ name: "Old", email: "old@example.com", role: UserRole.Student, avatarUrl: null });
+      const updated = updateUser({ id: user.id, name: "New Name", email: "new@example.com", bio: "A short bio" });
 
       expect(updated.name).toBe("New Name");
       expect(updated.email).toBe("new@example.com");
@@ -100,12 +85,7 @@ describe("userService", () => {
     });
 
     it("updateUserRole promotes a user", () => {
-      const user = createUser(
-        "Promote",
-        "promote@example.com",
-        UserRole.Student,
-        null
-      );
+      const user = createUser({ name: "Promote", email: "promote@example.com", role: UserRole.Student, avatarUrl: null });
       const updated = updateUserRole(user.id, UserRole.Admin);
       expect(updated.role).toBe(UserRole.Admin);
     });
