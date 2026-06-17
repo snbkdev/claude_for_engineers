@@ -189,4 +189,23 @@ describe("instructor.analytics loader", () => {
     expect(result.seatsSold).toBe(4); // 3 team + 1 individual
     expect(result.outstandingSeats).toBe(2); // 3 team seats, 1 redeemed
   });
+
+  it("scopes the per-course breakdown by role", async () => {
+    const { course2 } = addOtherInstructorCourse();
+    addPurchase(base.course.id, 4999);
+    addPurchase(course2.id, 9999);
+
+    getCurrentUserIdMock.mockResolvedValue(base.instructor.id);
+    const instructorView = await callLoader(request);
+    expect(instructorView.courseBreakdown.map((c) => c.courseId)).toEqual([
+      base.course.id,
+    ]);
+
+    const admin = addAdmin();
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const adminView = await callLoader(request);
+    expect(adminView.courseBreakdown.map((c) => c.courseId).sort()).toEqual(
+      [base.course.id, course2.id].sort()
+    );
+  });
 });

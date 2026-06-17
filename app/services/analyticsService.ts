@@ -1,6 +1,6 @@
 import { inArray, and, gt, gte, lt, isNull, count, type SQL } from "drizzle-orm";
 import { db } from "~/db";
-import { purchases, coupons } from "~/db/schema";
+import { purchases, coupons, courses } from "~/db/schema";
 
 // ─── Analytics Service ───
 // Aggregates revenue from purchases, scoped by a list of course IDs. The service
@@ -80,6 +80,51 @@ export function getRevenueSummary(opts: {
   }
 
   return { totalRevenue, transactionCount, averageOrderValue, seatsSold };
+}
+
+export interface CourseRevenueRow {
+  courseId: number;
+  title: string;
+  revenue: number; // cents
+  transactions: number;
+  seats: number;
+}
+
+// Per-course breakdown for the in-scope courses (every in-scope course is
+// included, even with no sales). Same counting semantics as getRevenueSummary;
+// rows are returned sorted by revenue descending.
+export function getRevenueByCourse(opts: {
+  courseIds: number[];
+  from?: string | null;
+  to?: string | null;
+}): CourseRevenueRow[] {
+  if (opts.courseIds.length === 0) {
+    return [];
+  }
+
+  const courseRows = db
+    .select({ id: courses.id, title: courses.title })
+    .from(courses)
+    .where(inArray(courses.id, opts.courseIds))
+    .all();
+
+  const rows = courseRows.map((course) => {
+    const summary = getRevenueSummary({
+      courseIds: [course.id],
+      from: opts.from,
+      to: opts.to,
+    });
+    return {
+      courseId: course.id,
+      title: course.title,
+      revenue: summary.totalRevenue,
+      transactions: summary.transactionCount,
+      seats: summary.seatsSold,
+    };
+  });
+
+  rows.sort((a, b) => b.revenue - a.revenue);
+  return rows;
 }
 
 // Outstanding seats are a current-state snapshot (not period-scoped): coupons

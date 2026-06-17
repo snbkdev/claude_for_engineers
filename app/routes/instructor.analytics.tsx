@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, data, isRouteErrorResponse } from "react-router";
 import type { Route } from "./+types/instructor.analytics";
 import { getCurrentUserId } from "~/lib/session";
@@ -6,6 +7,7 @@ import { getCoursesByInstructor, getAllCourses } from "~/services/courseService"
 import {
   getRevenueSummary,
   getOutstandingSeats,
+  getRevenueByCourse,
 } from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -18,6 +20,9 @@ import {
   Receipt,
   Ticket,
   Hourglass,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   type LucideIcon,
 } from "lucide-react";
 import { formatCents } from "~/lib/utils";
@@ -82,6 +87,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     seatsSold: period.seatsSold,
     // Outstanding seats are a snapshot of all unredeemed seats, not period-scoped.
     outstandingSeats: getOutstandingSeats({ courseIds }),
+    courseBreakdown: getRevenueByCourse({
+      courseIds,
+      from: range.from,
+      to: range.to,
+    }),
   };
 }
 
@@ -123,6 +133,108 @@ export function HydrateFallback() {
   );
 }
 
+interface CourseRow {
+  courseId: number;
+  title: string;
+  revenue: number;
+  transactions: number;
+  seats: number;
+}
+
+type SortKey = "title" | "revenue" | "transactions" | "seats";
+
+function CourseBreakdownTable({ courses }: { courses: CourseRow[] }) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "revenue",
+    dir: "desc",
+  });
+
+  const sorted = [...courses].sort((a, b) => {
+    const dir = sort.dir === "asc" ? 1 : -1;
+    if (sort.key === "title") return a.title.localeCompare(b.title) * dir;
+    return (a[sort.key] - b[sort.key]) * dir;
+  });
+
+  function toggleSort(key: SortKey) {
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "title" ? "asc" : "desc" }
+    );
+  }
+
+  function SortHeader({
+    label,
+    sortKey,
+    numeric,
+  }: {
+    label: string;
+    sortKey: SortKey;
+    numeric?: boolean;
+  }) {
+    const active = sort.key === sortKey;
+    const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+    return (
+      <th
+        className={`px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground ${
+          numeric ? "text-right" : "text-left"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => toggleSort(sortKey)}
+          className={`inline-flex items-center gap-1 hover:text-foreground ${
+            numeric ? "flex-row-reverse" : ""
+          } ${active ? "text-foreground" : ""}`}
+        >
+          {label}
+          <Icon className="size-3" />
+        </button>
+      </th>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <SortHeader label="Course" sortKey="title" />
+                <SortHeader label="Revenue" sortKey="revenue" numeric />
+                <SortHeader label="Sales" sortKey="transactions" numeric />
+                <SortHeader label="Seats" sortKey="seats" numeric />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((course) => (
+                <tr
+                  key={course.courseId}
+                  className="border-b border-border last:border-0"
+                >
+                  <td className="px-4 py-3 text-sm font-medium">
+                    {course.title}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {formatCents(course.revenue)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {course.transactions}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {course.seats}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
@@ -135,6 +247,7 @@ export default function InstructorAnalytics({
     averageOrderValue,
     seatsSold,
     outstandingSeats,
+    courseBreakdown,
   } = loaderData;
   const periodLabel =
     range.preset === "custom"
@@ -237,6 +350,14 @@ export default function InstructorAnalytics({
           value={String(outstandingSeats)}
           icon={Hourglass}
         />
+      </div>
+
+      <div className="mt-10">
+        <h2 className="mb-1 text-xl font-semibold">Revenue by course</h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          {periodLabel} · click a column to sort
+        </p>
+        <CourseBreakdownTable courses={courseBreakdown} />
       </div>
     </div>
   );

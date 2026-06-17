@@ -11,7 +11,11 @@ vi.mock("~/db", () => ({
   },
 }));
 
-import { getRevenueSummary, getOutstandingSeats } from "./analyticsService";
+import {
+  getRevenueSummary,
+  getOutstandingSeats,
+  getRevenueByCourse,
+} from "./analyticsService";
 
 function addPurchase(opts: {
   courseId: number;
@@ -230,6 +234,80 @@ describe("analyticsService", () => {
 
       expect(summary.transactionCount).toBe(2);
       expect(summary.seatsSold).toBe(4); // 3 team seats + 1 individual
+    });
+  });
+
+  describe("getRevenueByCourse", () => {
+    it("returns one row per in-scope course, sorted by revenue desc", () => {
+      const courseB = addCourse("course-b");
+      addPurchase({ courseId: base.course.id, pricePaid: 1000 });
+      addPurchase({ courseId: courseB.id, pricePaid: 5000 });
+
+      const rows = getRevenueByCourse({
+        courseIds: [base.course.id, courseB.id],
+      });
+
+      expect(rows.map((r) => r.courseId)).toEqual([courseB.id, base.course.id]);
+      expect(rows[0].revenue).toBe(5000);
+      expect(rows[1].revenue).toBe(1000);
+    });
+
+    it("includes in-scope courses with no sales (zero values)", () => {
+      const courseB = addCourse("course-b");
+      addPurchase({ courseId: base.course.id, pricePaid: 1000 });
+
+      const rows = getRevenueByCourse({
+        courseIds: [base.course.id, courseB.id],
+      });
+
+      const emptyRow = rows.find((r) => r.courseId === courseB.id);
+      expect(emptyRow).toMatchObject({ revenue: 0, transactions: 0, seats: 0 });
+    });
+
+    it("reports per-course transactions and seats (team vs individual)", () => {
+      addTeamPurchase({ courseId: base.course.id, pricePaid: 30000, seats: 3 });
+      addPurchase({ courseId: base.course.id, pricePaid: 4999 });
+
+      const [row] = getRevenueByCourse({ courseIds: [base.course.id] });
+
+      expect(row.transactions).toBe(2);
+      expect(row.seats).toBe(4);
+      expect(row.revenue).toBe(34999);
+    });
+
+    it("only includes courses within the given scope", () => {
+      const other = addCourse("other-course");
+      addPurchase({ courseId: other.id, pricePaid: 9999 });
+
+      const rows = getRevenueByCourse({ courseIds: [base.course.id] });
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].courseId).toBe(base.course.id);
+    });
+
+    it("respects the date range", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        createdAt: "2020-01-01T00:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 2000,
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+
+      const [row] = getRevenueByCourse({
+        courseIds: [base.course.id],
+        from: "2026-01-01T00:00:00.000Z",
+        to: "2026-12-31T00:00:00.000Z",
+      });
+
+      expect(row.revenue).toBe(2000);
+    });
+
+    it("returns an empty array for an empty scope", () => {
+      expect(getRevenueByCourse({ courseIds: [] })).toEqual([]);
     });
   });
 
