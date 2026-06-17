@@ -11,6 +11,7 @@ import {
   Tag,
   Users,
   UsersRound,
+  ChartColumn,
   Moon,
   Sun,
   LogOut,
@@ -65,6 +66,12 @@ const navItems: NavItem[] = [
     to: "/instructor",
     icon: <GraduationCap className="size-4" />,
     roles: [UserRole.Instructor],
+  },
+  {
+    label: "Analytics",
+    to: "/instructor/analytics",
+    icon: <ChartColumn className="size-4" />,
+    roles: [UserRole.Instructor, UserRole.Admin],
   },
   {
     label: "Manage Users",

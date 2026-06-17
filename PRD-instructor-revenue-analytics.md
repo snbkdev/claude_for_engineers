@@ -183,93 +183,12 @@ revenue collected.
   anonymous rejected) and correct course-ID scoping (instructor → own courses only;
   admin → all courses).
 
-## Implementation Plan (Phased)
+## Implementation Plan
 
-The work is sequenced bottom-up by dependency: pure logic first, then the
-DB-backed core, then the route/loader, then the UI, then admin scope and polish.
-Each phase leaves the codebase green (`pnpm typecheck` + `pnpm test` passing) and
-is independently reviewable. Earlier phases ship real, tested value even if later
-phases slip.
-
-### Phase 1 — Pure helpers (no DB)
-**Goal:** the deterministic, dependency-free logic that everything else builds on.
-- Date-range utilities: resolve a preset (7 / 30 / 90 days, all-time) or a custom
-  from–to into a normalized `{ from, to }` (UTC boundaries; inclusive day handling).
-- `selectGranularity(from, to)` → `daily | weekly | monthly` (daily ≤ ~31 days,
-  weekly ≤ ~3 months, monthly beyond).
-- `bucketPeriods(from, to, granularity)` → ordered period boundaries + labels.
-- ISO-code → country-name lookup covering the codes the app records; unknown/`null`
-  resolves to "Unknown".
-
-**Tests:** unit tests in isolation — granularity thresholds (incl. boundaries),
-bucket boundaries across daily/weekly/monthly, preset/custom normalization, and
-country-name lookup (known code, unknown code, `null`).
-**Exit criteria:** helpers fully tested and green; no app wiring yet.
-**Covers stories:** 12, 14, 15, 16, 17, 18 (logic only).
-
-### Phase 2 — Analytics aggregation service (DB-backed core)
-**Goal:** the deep, auth-agnostic module that turns a course-ID list + range into
-numbers. Depends on Phase 1 for granularity/bucketing.
-- New service (synchronous, object-param convention, `// ─── X Service ───` header):
-  - `getRevenueSummary({ courseIds, from?, to? })` → total revenue, transaction
-    count, AOV, seats sold, outstanding seats.
-  - `getRevenueByCourse({ courseIds, from?, to? })` → per-course rows.
-  - `getRevenueByCountry({ courseIds, from?, to? })` → rows with `null` → "Unknown".
-  - `getRevenueTimeSeries({ courseIds, from?, to?, granularity })` → ordered buckets.
-- Enforces the counting semantics: `pricePaid > 0` only; team buy = 1 transaction
-  but N seats; outstanding = unredeemed coupons; all-time = summary with no range.
-
-**Tests:** against an in-memory DB (`createTestDb` + `~/db` mock) — revenue sums,
-$0 exclusion, individual-vs-team transaction/seat counting, outstanding seats,
-country bucketing incl. "Unknown", date-range filtering, and empty-scope returns.
-**Exit criteria:** service fully tested and green; callable in isolation.
-**Covers stories:** 3, 4, 5, 6, 7, 8, 9, 11, 13, 19 (data layer).
-
-### Phase 3 — Route, loader & authorization
-**Goal:** wire the service to a real, secured endpoint that resolves scope and range.
-- Register `/instructor/analytics` under the app layout.
-- Loader: resolve current user → require `instructor` or `admin` (401/403 via
-  `data(...)`); resolve course IDs (instructor → own courses; admin → all courses);
-  parse range from URL query params (default last 30 days); call the service and
-  return plain data.
-
-**Tests:** loader tests — anonymous → 401, student → 403, instructor sees only own
-courses, admin scope spans all courses, and query-param range parsing (default +
-custom).
-**Exit criteria:** endpoint returns correct, authorized data (renderable as JSON
-even before the UI is built).
-**Covers stories:** 21, 22, 24, 25, 26, 28 (and admin scope for 23).
-
-### Phase 4 — Dashboard UI
-**Goal:** the page an instructor actually uses.
-- KPI summary cards: total revenue (period) + persistent all-time total, sales,
-  AOV, seats sold, outstanding seats — all via the existing `$X.XX` formatter.
-- Tables: per-course breakdown (sortable by revenue), revenue-over-time buckets,
-  revenue-by-country (full country names, "Unknown" row).
-- Range controls: preset buttons + custom from–to picker, reflected in URL.
-- Empty/zero states for instructors with no qualifying sales.
-- "Analytics" sidebar link shown to instructors and admins.
-
-**Tests:** none new required at this boundary beyond Phase 3 (UI verified manually /
-via existing patterns); add component tests only if a piece warrants it.
-**Exit criteria:** dashboard renders all KPIs/tables, range controls work, empty
-states look intentional, link appears for the right roles.
-**Covers stories:** 1, 2, 10, 20, 23, 27 (and surfaces all data stories visually).
-
-### Phase 5 — Polish & verification
-**Goal:** confirm the whole flow end-to-end and tidy edges.
-- Verify admin platform-wide totals reconcile with per-course/by-country tables.
-- Confirm sorting, range switching, and bookmarkable URLs behave on reload.
-- Final `pnpm typecheck`, full `pnpm test`, and `pnpm build`; manual pass as
-  instructor (own courses only) and admin (all courses).
-- Update the CLAUDE.md changelog entry.
-
-**Exit criteria:** all green; manual verification done for both roles.
-
-### Dependency summary
-Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5. Phases 1 and 2 are the deep,
-heavily-tested modules; 3 adds the security boundary; 4 is presentation; 5 is
-verification. No schema changes in any phase.
+The phased implementation plan lives in `plans/instructor-analytics-dashboard.md`
+(overview, durable architectural decisions, all phases, and the phase → story
+coverage table). It is the canonical source for sequencing; this PRD describes the
+*what* and *why*, the plan describes the *how* and *in what order*.
 
 ## Out of Scope
 
