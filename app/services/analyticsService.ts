@@ -1,6 +1,6 @@
-import { inArray, and, gt, gte, lt, sum, type SQL } from "drizzle-orm";
+import { inArray, and, gt, gte, lt, isNull, count, type SQL } from "drizzle-orm";
 import { db } from "~/db";
-import { purchases } from "~/db/schema";
+import { purchases, coupons } from "~/db/schema";
 
 // ─── Analytics Service ───
 // Aggregates revenue from purchases, scoped by a list of course IDs. The service
@@ -9,13 +9,18 @@ import { purchases } from "~/db/schema";
 // (better-sqlite3). Functions with multiple same-typed params take a single
 // object param.
 //
-// Counting semantics: only purchases with pricePaid > 0 count toward revenue
-// ($0 / free purchases are excluded). An optional from/to range filters on
-// purchases.createdAt — `from` is an inclusive lower bound, `to` an exclusive
-// upper bound (both ISO timestamps). Omitting both yields the all-time figure.
+// Counting semantics: only purchases with pricePaid > 0 count toward revenue,
+// sales, AOV, and seats ($0 / free purchases are excluded). An optional from/to
+// range filters on purchases.createdAt — `from` is an inclusive lower bound,
+// `to` an exclusive upper bound (both ISO timestamps). Omitting both yields the
+// all-time figure. A team/bulk purchase is one transaction but sells N seats
+// (its coupon count); an individual purchase is one transaction and one seat.
 
 export interface RevenueSummary {
   totalRevenue: number; // cents
+  transactionCount: number;
+  averageOrderValue: number; // cents (revenue / transactions; 0 when no txns)
+  seatsSold: number;
 }
 
 export function getRevenueSummary(opts: {
@@ -24,7 +29,12 @@ export function getRevenueSummary(opts: {
   to?: string | null;
 }): RevenueSummary {
   if (opts.courseIds.length === 0) {
-    return { totalRevenue: 0 };
+    return {
+      totalRevenue: 0,
+      transactionCount: 0,
+      averageOrderValue: 0,
+      seatsSold: 0,
+    };
   }
 
   const conditions: SQL[] = [
@@ -34,11 +44,61 @@ export function getRevenueSummary(opts: {
   if (opts.from) conditions.push(gte(purchases.createdAt, opts.from));
   if (opts.to) conditions.push(lt(purchases.createdAt, opts.to));
 
-  const row = db
-    .select({ total: sum(purchases.pricePaid) })
+  const rows = db
+    .select({ id: purchases.id, pricePaid: purchases.pricePaid })
     .from(purchases)
     .where(and(...conditions))
+    .all();
+
+  const totalRevenue = rows.reduce((sum, r) => sum + r.pricePaid, 0);
+  const transactionCount = rows.length;
+  const averageOrderValue =
+    transactionCount === 0 ? 0 : totalRevenue / transactionCount;
+
+  // Seats: a purchase with coupons sells one seat per coupon; a purchase with
+  // none (an individual sale) sells one seat.
+  let seatsSold = 0;
+  if (rows.length > 0) {
+    const couponCounts = db
+      .select({ purchaseId: coupons.purchaseId, seats: count() })
+      .from(coupons)
+      .where(
+        inArray(
+          coupons.purchaseId,
+          rows.map((r) => r.id)
+        )
+      )
+      .groupBy(coupons.purchaseId)
+      .all();
+    const seatsByPurchase = new Map(
+      couponCounts.map((c) => [c.purchaseId, Number(c.seats)])
+    );
+    seatsSold = rows.reduce(
+      (sum, r) => sum + (seatsByPurchase.get(r.id) ?? 1),
+      0
+    );
+  }
+
+  return { totalRevenue, transactionCount, averageOrderValue, seatsSold };
+}
+
+// Outstanding seats are a current-state snapshot (not period-scoped): coupons
+// for the in-scope courses that have been sold but not yet redeemed.
+export function getOutstandingSeats(opts: { courseIds: number[] }): number {
+  if (opts.courseIds.length === 0) {
+    return 0;
+  }
+
+  const row = db
+    .select({ seats: count() })
+    .from(coupons)
+    .where(
+      and(
+        inArray(coupons.courseId, opts.courseIds),
+        isNull(coupons.redeemedByUserId)
+      )
+    )
     .get();
 
-  return { totalRevenue: Number(row?.total ?? 0) };
+  return Number(row?.seats ?? 0);
 }

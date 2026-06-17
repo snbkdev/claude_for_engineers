@@ -11,7 +11,7 @@ vi.mock("~/db", () => ({
   },
 }));
 
-import { getRevenueSummary } from "./analyticsService";
+import { getRevenueSummary, getOutstandingSeats } from "./analyticsService";
 
 function addPurchase(opts: {
   courseId: number;
@@ -30,6 +30,38 @@ function addPurchase(opts: {
     })
     .returning()
     .get();
+}
+
+// A team/bulk purchase: one purchase row + `seats` coupons referencing it.
+// `redeemed` of them are marked consumed.
+function addTeamPurchase(opts: {
+  courseId: number;
+  pricePaid: number;
+  seats: number;
+  redeemed?: number;
+  createdAt?: string;
+}) {
+  const purchase = addPurchase({
+    courseId: opts.courseId,
+    pricePaid: opts.pricePaid,
+    createdAt: opts.createdAt,
+  });
+  const team = testDb.insert(schema.teams).values({}).returning().get();
+  for (let i = 0; i < opts.seats; i++) {
+    const redeemed = i < (opts.redeemed ?? 0);
+    testDb
+      .insert(schema.coupons)
+      .values({
+        teamId: team.id,
+        courseId: opts.courseId,
+        code: `coupon-${purchase.id}-${i}`,
+        purchaseId: purchase.id,
+        redeemedByUserId: redeemed ? base.user.id : null,
+        redeemedAt: redeemed ? new Date().toISOString() : null,
+      })
+      .run();
+  }
+  return purchase;
 }
 
 function addCourse(slug: string) {
@@ -152,6 +184,89 @@ describe("analyticsService", () => {
       expect(
         getRevenueSummary({ courseIds: [base.course.id] }).totalRevenue
       ).toBe(3000);
+    });
+
+    it("counts transactions and computes average order value", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 4999 });
+      addPurchase({ courseId: base.course.id, pricePaid: 2500 });
+
+      const summary = getRevenueSummary({ courseIds: [base.course.id] });
+
+      expect(summary.transactionCount).toBe(2);
+      expect(summary.averageOrderValue).toBe((4999 + 2500) / 2);
+    });
+
+    it("excludes $0 purchases from transactions and AOV", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 4000 });
+      addPurchase({ courseId: base.course.id, pricePaid: 0 });
+
+      const summary = getRevenueSummary({ courseIds: [base.course.id] });
+
+      expect(summary.transactionCount).toBe(1);
+      expect(summary.averageOrderValue).toBe(4000);
+    });
+
+    it("reports zero transactions and AOV when there are no sales", () => {
+      const summary = getRevenueSummary({ courseIds: [base.course.id] });
+      expect(summary.transactionCount).toBe(0);
+      expect(summary.averageOrderValue).toBe(0);
+    });
+
+    it("counts one seat per individual purchase", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 4999 });
+      addPurchase({ courseId: base.course.id, pricePaid: 2500 });
+
+      const summary = getRevenueSummary({ courseIds: [base.course.id] });
+
+      expect(summary.seatsSold).toBe(2);
+      expect(summary.transactionCount).toBe(2);
+    });
+
+    it("counts a team purchase as one transaction but N seats", () => {
+      addTeamPurchase({ courseId: base.course.id, pricePaid: 30000, seats: 3 });
+      addPurchase({ courseId: base.course.id, pricePaid: 4999 }); // individual
+
+      const summary = getRevenueSummary({ courseIds: [base.course.id] });
+
+      expect(summary.transactionCount).toBe(2);
+      expect(summary.seatsSold).toBe(4); // 3 team seats + 1 individual
+    });
+  });
+
+  describe("getOutstandingSeats", () => {
+    it("counts unredeemed coupons for in-scope courses", () => {
+      addTeamPurchase({
+        courseId: base.course.id,
+        pricePaid: 30000,
+        seats: 3,
+        redeemed: 1,
+      });
+
+      expect(getOutstandingSeats({ courseIds: [base.course.id] })).toBe(2);
+    });
+
+    it("ignores coupons for courses outside the scope", () => {
+      const other = addCourse("other-course");
+      addTeamPurchase({ courseId: base.course.id, pricePaid: 30000, seats: 2 });
+      addTeamPurchase({ courseId: other.id, pricePaid: 30000, seats: 4 });
+
+      expect(getOutstandingSeats({ courseIds: [base.course.id] })).toBe(2);
+    });
+
+    it("is not affected by the date range (snapshot of current state)", () => {
+      addTeamPurchase({
+        courseId: base.course.id,
+        pricePaid: 30000,
+        seats: 5,
+        redeemed: 2,
+        createdAt: "2020-01-01T00:00:00.000Z",
+      });
+
+      expect(getOutstandingSeats({ courseIds: [base.course.id] })).toBe(3);
+    });
+
+    it("returns 0 for an empty scope", () => {
+      expect(getOutstandingSeats({ courseIds: [] })).toBe(0);
     });
   });
 });

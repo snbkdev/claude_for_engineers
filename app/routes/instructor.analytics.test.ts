@@ -151,4 +151,42 @@ describe("instructor.analytics loader", () => {
     expect(result.periodRevenue).toBe(4999);
     expect(result.allTimeRevenue).toBe(5999);
   });
+
+  it("exposes the full KPI set (sales, AOV, seats, outstanding)", async () => {
+    // One team purchase (3 seats, 1 redeemed) + one individual, both recent.
+    const recent = new Date(Date.now() - 2 * 86400_000).toISOString();
+    const teamPurchase = testDb
+      .insert(schema.purchases)
+      .values({
+        userId: base.user.id,
+        courseId: base.course.id,
+        pricePaid: 30000,
+        country: "US",
+        createdAt: recent,
+      })
+      .returning()
+      .get();
+    const team = testDb.insert(schema.teams).values({}).returning().get();
+    for (let i = 0; i < 3; i++) {
+      testDb
+        .insert(schema.coupons)
+        .values({
+          teamId: team.id,
+          courseId: base.course.id,
+          code: `c-${i}`,
+          purchaseId: teamPurchase.id,
+          redeemedByUserId: i === 0 ? base.user.id : null,
+        })
+        .run();
+    }
+    addPurchase(base.course.id, 10000, recent); // individual
+
+    getCurrentUserIdMock.mockResolvedValue(base.instructor.id);
+    const result = await callLoader(request);
+
+    expect(result.salesCount).toBe(2);
+    expect(result.averageOrderValue).toBe((30000 + 10000) / 2);
+    expect(result.seatsSold).toBe(4); // 3 team + 1 individual
+    expect(result.outstandingSeats).toBe(2); // 3 team seats, 1 redeemed
+  });
 });

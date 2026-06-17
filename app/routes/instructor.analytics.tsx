@@ -3,13 +3,23 @@ import type { Route } from "./+types/instructor.analytics";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { getCoursesByInstructor, getAllCourses } from "~/services/courseService";
-import { getRevenueSummary } from "~/services/analyticsService";
+import {
+  getRevenueSummary,
+  getOutstandingSeats,
+} from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, DollarSign } from "lucide-react";
+import {
+  AlertTriangle,
+  DollarSign,
+  Receipt,
+  Ticket,
+  Hourglass,
+  type LucideIcon,
+} from "lucide-react";
 import { formatCents } from "~/lib/utils";
 import {
   resolveRange,
@@ -67,10 +77,39 @@ export async function loader({ request }: Route.LoaderArgs) {
     },
     periodRevenue: period.totalRevenue,
     allTimeRevenue: allTime.totalRevenue,
+    salesCount: period.transactionCount,
+    averageOrderValue: period.averageOrderValue,
+    seatsSold: period.seatsSold,
+    // Outstanding seats are a snapshot of all unredeemed seats, not period-scoped.
+    outstandingSeats: getOutstandingSeats({ courseIds }),
   };
 }
 
 const PRESETS: RangePreset[] = ["7d", "30d", "90d", "all"];
+
+function Kpi({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon: LucideIcon;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <span className="text-sm font-medium text-muted-foreground">
+          {label}
+        </span>
+        <Icon className="size-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-3xl font-bold">{value}</div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function HydrateFallback() {
   return (
@@ -87,7 +126,16 @@ export function HydrateFallback() {
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
-  const { scope, range, periodRevenue, allTimeRevenue } = loaderData;
+  const {
+    scope,
+    range,
+    periodRevenue,
+    allTimeRevenue,
+    salesCount,
+    averageOrderValue,
+    seatsSold,
+    outstandingSeats,
+  } = loaderData;
   const periodLabel =
     range.preset === "custom"
       ? "Selected range"
@@ -159,33 +207,36 @@ export default function InstructorAnalytics({
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <span className="text-sm font-medium text-muted-foreground">
-              Revenue · {periodLabel}
-            </span>
-            <DollarSign className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              {formatCents(periodRevenue)}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <span className="text-sm font-medium text-muted-foreground">
-              Revenue · all time
-            </span>
-            <DollarSign className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">
-              {formatCents(allTimeRevenue)}
-            </div>
-          </CardContent>
-        </Card>
+        <Kpi
+          label={`Revenue · ${periodLabel}`}
+          value={formatCents(periodRevenue)}
+          icon={DollarSign}
+        />
+        <Kpi
+          label="Revenue · all time"
+          value={formatCents(allTimeRevenue)}
+          icon={DollarSign}
+        />
+        <Kpi
+          label={`Sales · ${periodLabel}`}
+          value={String(salesCount)}
+          icon={Receipt}
+        />
+        <Kpi
+          label={`Avg order value · ${periodLabel}`}
+          value={formatCents(averageOrderValue)}
+          icon={DollarSign}
+        />
+        <Kpi
+          label={`Seats sold · ${periodLabel}`}
+          value={String(seatsSold)}
+          icon={Ticket}
+        />
+        <Kpi
+          label="Outstanding seats"
+          value={String(outstandingSeats)}
+          icon={Hourglass}
+        />
       </div>
     </div>
   );
