@@ -21,7 +21,15 @@ vi.mock("~/lib/session", () => ({
 
 import { loader } from "./instructor.analytics";
 
-const request = new Request("http://localhost/instructor/analytics");
+function requestWith(query = ""): Request {
+  return new Request(`http://localhost/instructor/analytics${query}`);
+}
+
+const request = requestWith();
+
+function callLoader(req: Request) {
+  return loader({ request: req, params: {}, context: {} } as never);
+}
 
 function addAdmin() {
   return testDb
@@ -52,16 +60,22 @@ function addOtherInstructorCourse() {
   return { instructor2, course2 };
 }
 
-function addPurchase(courseId: number, pricePaid: number) {
+function addPurchase(courseId: number, pricePaid: number, createdAt?: string) {
   testDb
     .insert(schema.purchases)
-    .values({ userId: base.user.id, courseId, pricePaid, country: "US" })
+    .values({
+      userId: base.user.id,
+      courseId,
+      pricePaid,
+      country: "US",
+      ...(createdAt ? { createdAt } : {}),
+    })
     .run();
 }
 
 async function loaderStatus(): Promise<number | undefined> {
   try {
-    await loader({ request, params: {}, context: {} } as never);
+    await callLoader(request);
   } catch (err) {
     return (err as { init?: { status?: number } })?.init?.status;
   }
@@ -91,10 +105,10 @@ describe("instructor.analytics loader", () => {
     addPurchase(course2.id, 9999); // owned by another instructor
 
     getCurrentUserIdMock.mockResolvedValue(base.instructor.id);
-    const result = await loader({ request, params: {}, context: {} } as never);
+    const result = await callLoader(request);
 
     expect(result.scope).toBe("instructor");
-    expect(result.totalRevenue).toBe(4999);
+    expect(result.allTimeRevenue).toBe(4999);
   });
 
   it("gives admins platform-wide totals across all courses", async () => {
@@ -104,9 +118,37 @@ describe("instructor.analytics loader", () => {
     const admin = addAdmin();
 
     getCurrentUserIdMock.mockResolvedValue(admin.id);
-    const result = await loader({ request, params: {}, context: {} } as never);
+    const result = await callLoader(request);
 
     expect(result.scope).toBe("platform");
-    expect(result.totalRevenue).toBe(14998);
+    expect(result.allTimeRevenue).toBe(14998);
+  });
+
+  it("defaults to a 30-day period while all-time stays unbounded", async () => {
+    const recent = new Date(Date.now() - 5 * 86400_000).toISOString();
+    addPurchase(base.course.id, 4999, recent); // within last 30 days
+    addPurchase(base.course.id, 1000, "2020-01-01T00:00:00.000Z"); // old
+
+    getCurrentUserIdMock.mockResolvedValue(base.instructor.id);
+    const result = await callLoader(request);
+
+    expect(result.range.preset).toBe("30d");
+    expect(result.periodRevenue).toBe(4999);
+    expect(result.allTimeRevenue).toBe(5999);
+  });
+
+  it("honors a custom from–to range from query params", async () => {
+    addPurchase(base.course.id, 4999, "2020-06-15T00:00:00.000Z");
+    addPurchase(base.course.id, 1000, "2026-06-01T00:00:00.000Z");
+
+    getCurrentUserIdMock.mockResolvedValue(base.instructor.id);
+    const result = await callLoader(
+      requestWith("?from=2020-06-01&to=2020-06-30")
+    );
+
+    expect(result.range.preset).toBe("custom");
+    expect(result.range.fromDate).toBe("2020-06-01");
+    expect(result.periodRevenue).toBe(4999);
+    expect(result.allTimeRevenue).toBe(5999);
   });
 });

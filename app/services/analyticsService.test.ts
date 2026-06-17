@@ -17,6 +17,7 @@ function addPurchase(opts: {
   courseId: number;
   pricePaid: number;
   country?: string | null;
+  createdAt?: string;
 }) {
   return testDb
     .insert(schema.purchases)
@@ -25,6 +26,7 @@ function addPurchase(opts: {
       courseId: opts.courseId,
       pricePaid: opts.pricePaid,
       country: opts.country ?? "US",
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning()
     .get();
@@ -102,6 +104,54 @@ describe("analyticsService", () => {
       expect(
         getRevenueSummary({ courseIds: [base.course.id] }).totalRevenue
       ).toBe(0);
+    });
+
+    it("filters by date range (from inclusive, to exclusive)", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        createdAt: "2026-01-10T00:00:00.000Z", // before range
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 2000,
+        createdAt: "2026-02-01T00:00:00.000Z", // inclusive lower bound
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 4000,
+        createdAt: "2026-02-15T12:00:00.000Z", // inside range
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 8000,
+        createdAt: "2026-03-01T00:00:00.000Z", // exclusive upper bound — excluded
+      });
+
+      const summary = getRevenueSummary({
+        courseIds: [base.course.id],
+        from: "2026-02-01T00:00:00.000Z",
+        to: "2026-03-01T00:00:00.000Z",
+      });
+
+      expect(summary.totalRevenue).toBe(6000);
+    });
+
+    it("treats an omitted range as all-time", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        createdAt: "2020-01-01T00:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 2000,
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+
+      expect(
+        getRevenueSummary({ courseIds: [base.course.id] }).totalRevenue
+      ).toBe(3000);
     });
   });
 });

@@ -1,4 +1,4 @@
-import { inArray, and, gt, sum } from "drizzle-orm";
+import { inArray, and, gt, gte, lt, sum, type SQL } from "drizzle-orm";
 import { db } from "~/db";
 import { purchases } from "~/db/schema";
 
@@ -10,7 +10,9 @@ import { purchases } from "~/db/schema";
 // object param.
 //
 // Counting semantics: only purchases with pricePaid > 0 count toward revenue
-// ($0 / free purchases are excluded).
+// ($0 / free purchases are excluded). An optional from/to range filters on
+// purchases.createdAt — `from` is an inclusive lower bound, `to` an exclusive
+// upper bound (both ISO timestamps). Omitting both yields the all-time figure.
 
 export interface RevenueSummary {
   totalRevenue: number; // cents
@@ -18,20 +20,24 @@ export interface RevenueSummary {
 
 export function getRevenueSummary(opts: {
   courseIds: number[];
+  from?: string | null;
+  to?: string | null;
 }): RevenueSummary {
   if (opts.courseIds.length === 0) {
     return { totalRevenue: 0 };
   }
 
+  const conditions: SQL[] = [
+    inArray(purchases.courseId, opts.courseIds),
+    gt(purchases.pricePaid, 0),
+  ];
+  if (opts.from) conditions.push(gte(purchases.createdAt, opts.from));
+  if (opts.to) conditions.push(lt(purchases.createdAt, opts.to));
+
   const row = db
     .select({ total: sum(purchases.pricePaid) })
     .from(purchases)
-    .where(
-      and(
-        inArray(purchases.courseId, opts.courseIds),
-        gt(purchases.pricePaid, 0)
-      )
-    )
+    .where(and(...conditions))
     .get();
 
   return { totalRevenue: Number(row?.total ?? 0) };
