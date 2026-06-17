@@ -40,7 +40,7 @@ import {
 import { CourseImage } from "~/components/course-image";
 import { UserAvatar } from "~/components/user-avatar";
 import { data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
+import * as v from "valibot";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { parseFormData } from "~/lib/validation";
 import { renderMarkdown } from "~/lib/markdown.server";
@@ -155,9 +155,15 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   };
 }
 
-const courseActionSchema = z.object({
-  intent: z.literal("rate-course"),
-  rating: z.coerce.number().int().min(1).max(5),
+const courseActionSchema = v.object({
+  intent: v.literal("rate-course"),
+  rating: v.pipe(
+    v.string(),
+    v.transform(Number),
+    v.integer(),
+    v.minValue(1),
+    v.maxValue(5)
+  ),
 });
 
 export async function action({ params, request }: Route.ActionArgs) {
