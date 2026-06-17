@@ -15,6 +15,7 @@ import {
   getRevenueSummary,
   getOutstandingSeats,
   getRevenueByCourse,
+  getRevenueTimeSeries,
 } from "./analyticsService";
 
 function addPurchase(opts: {
@@ -308,6 +309,103 @@ describe("analyticsService", () => {
 
     it("returns an empty array for an empty scope", () => {
       expect(getRevenueByCourse({ courseIds: [] })).toEqual([]);
+    });
+  });
+
+  describe("getRevenueTimeSeries", () => {
+    it("aggregates revenue and sales into daily buckets across the range", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        createdAt: "2026-06-01T08:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 2000,
+        createdAt: "2026-06-01T20:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 5000,
+        createdAt: "2026-06-03T10:00:00.000Z",
+      });
+
+      const series = getRevenueTimeSeries({
+        courseIds: [base.course.id],
+        from: "2026-06-01T00:00:00.000Z",
+        to: "2026-06-04T00:00:00.000Z",
+      });
+
+      expect(series.map((p) => p.label)).toEqual(["Jun 1", "Jun 2", "Jun 3"]);
+      expect(series[0]).toMatchObject({ revenue: 3000, transactions: 2 });
+      expect(series[1]).toMatchObject({ revenue: 0, transactions: 0 });
+      expect(series[2]).toMatchObject({ revenue: 5000, transactions: 1 });
+    });
+
+    it("excludes $0 purchases from the buckets", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 0,
+        createdAt: "2026-06-01T08:00:00.000Z",
+      });
+
+      const series = getRevenueTimeSeries({
+        courseIds: [base.course.id],
+        from: "2026-06-01T00:00:00.000Z",
+        to: "2026-06-02T00:00:00.000Z",
+      });
+
+      expect(series).toHaveLength(1);
+      expect(series[0]).toMatchObject({ revenue: 0, transactions: 0 });
+    });
+
+    it("derives the range from the data when none is given (all-time)", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        createdAt: "2026-01-15T00:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 4000,
+        createdAt: "2026-03-20T00:00:00.000Z",
+      });
+
+      const series = getRevenueTimeSeries({ courseIds: [base.course.id] });
+
+      // ~64-day span → weekly buckets; totals reconcile with the raw revenue.
+      expect(series.length).toBeGreaterThan(0);
+      const total = series.reduce((sum, p) => sum + p.revenue, 0);
+      expect(total).toBe(5000);
+    });
+
+    it("honors an explicit granularity", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        createdAt: "2026-01-10T00:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 2000,
+        createdAt: "2026-02-10T00:00:00.000Z",
+      });
+
+      const series = getRevenueTimeSeries({
+        courseIds: [base.course.id],
+        from: "2026-01-01T00:00:00.000Z",
+        to: "2026-03-01T00:00:00.000Z",
+        granularity: "monthly",
+      });
+
+      expect(series.map((p) => p.label)).toEqual(["Jan 2026", "Feb 2026"]);
+      expect(series[0].revenue).toBe(1000);
+      expect(series[1].revenue).toBe(2000);
+    });
+
+    it("returns an empty array for an empty scope or no all-time data", () => {
+      expect(getRevenueTimeSeries({ courseIds: [] })).toEqual([]);
+      expect(getRevenueTimeSeries({ courseIds: [base.course.id] })).toEqual([]);
     });
   });
 

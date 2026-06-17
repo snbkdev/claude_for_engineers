@@ -188,6 +188,8 @@ describe("instructor.analytics loader", () => {
     expect(result.averageOrderValue).toBe((30000 + 10000) / 2);
     expect(result.seatsSold).toBe(4); // 3 team + 1 individual
     expect(result.outstandingSeats).toBe(2); // 3 team seats, 1 redeemed
+    expect(result.timeSeries.length).toBeGreaterThan(0);
+    expect(result.timeSeries.reduce((s, p) => s + p.revenue, 0)).toBe(40000);
   });
 
   it("scopes the per-course breakdown by role", async () => {

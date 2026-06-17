@@ -107,3 +107,89 @@ export function resolveRange(
   const preset = isPreset(presetParam) ? presetParam : DEFAULT_PRESET;
   return resolvePreset(preset, now);
 }
+
+// ─── Time-series bucketing ───
+
+export type Granularity = "daily" | "weekly" | "monthly";
+
+export interface PeriodBucket {
+  /** Inclusive lower bound, ISO timestamp. */
+  start: string;
+  /** Exclusive upper bound, ISO timestamp. */
+  end: string;
+  /** Human-readable label for the bucket. */
+  label: string;
+}
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+function startOfUtcMonth(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function addMonths(date: Date, months: number): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1)
+  );
+}
+
+/**
+ * Choose a bucket granularity from the span of a date range so the resulting
+ * table stays readable: daily up to ~31 days, weekly up to ~3 months, monthly
+ * beyond.
+ */
+export function selectGranularity(
+  from: string | Date,
+  to: string | Date
+): Granularity {
+  const fromMs = new Date(from).getTime();
+  const toMs = new Date(to).getTime();
+  const days = Math.round((toMs - fromMs) / 86_400_000);
+  if (days <= 31) return "daily";
+  if (days <= 92) return "weekly";
+  return "monthly";
+}
+
+/**
+ * Produce ordered, contiguous buckets covering [from, to) at the given
+ * granularity. Each bucket's `end` is exclusive; daily/weekly buckets are
+ * day-aligned (UTC), monthly buckets are calendar months.
+ */
+export function bucketPeriods(
+  from: string | Date,
+  to: string | Date,
+  granularity: Granularity
+): PeriodBucket[] {
+  const toDate = new Date(to);
+  const buckets: PeriodBucket[] = [];
+
+  if (granularity === "monthly") {
+    let cursor = startOfUtcMonth(new Date(from));
+    while (cursor < toDate) {
+      const next = addMonths(cursor, 1);
+      buckets.push({
+        start: cursor.toISOString(),
+        end: next.toISOString(),
+        label: `${MONTHS[cursor.getUTCMonth()]} ${cursor.getUTCFullYear()}`,
+      });
+      cursor = next;
+    }
+    return buckets;
+  }
+
+  const step = granularity === "daily" ? 1 : 7;
+  let cursor = startOfUtcDay(new Date(from));
+  while (cursor < toDate) {
+    const next = addDays(cursor, step);
+    buckets.push({
+      start: cursor.toISOString(),
+      end: next.toISOString(),
+      label: `${MONTHS[cursor.getUTCMonth()]} ${cursor.getUTCDate()}`,
+    });
+    cursor = next;
+  }
+  return buckets;
+}

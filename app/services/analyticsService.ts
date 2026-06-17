@@ -1,6 +1,11 @@
 import { inArray, and, gt, gte, lt, isNull, count, type SQL } from "drizzle-orm";
 import { db } from "~/db";
 import { purchases, coupons, courses } from "~/db/schema";
+import {
+  selectGranularity,
+  bucketPeriods,
+  type Granularity,
+} from "~/lib/analytics";
 
 // ─── Analytics Service ───
 // Aggregates revenue from purchases, scoped by a list of course IDs. The service
@@ -125,6 +130,85 @@ export function getRevenueByCourse(opts: {
 
   rows.sort((a, b) => b.revenue - a.revenue);
   return rows;
+}
+
+export interface TimeSeriesPoint {
+  label: string;
+  periodStart: string; // ISO timestamp
+  revenue: number; // cents
+  transactions: number;
+}
+
+// Revenue over time, bucketed into contiguous periods. When from/to are given,
+// buckets span exactly that range (empty buckets render as zeros); when omitted
+// (all-time), the range is derived from the data (earliest sale → last sale).
+// Granularity is chosen automatically from the span unless one is passed.
+export function getRevenueTimeSeries(opts: {
+  courseIds: number[];
+  from?: string | null;
+  to?: string | null;
+  granularity?: Granularity;
+}): TimeSeriesPoint[] {
+  if (opts.courseIds.length === 0) {
+    return [];
+  }
+
+  const conditions: SQL[] = [
+    inArray(purchases.courseId, opts.courseIds),
+    gt(purchases.pricePaid, 0),
+  ];
+  if (opts.from) conditions.push(gte(purchases.createdAt, opts.from));
+  if (opts.to) conditions.push(lt(purchases.createdAt, opts.to));
+
+  const rows = db
+    .select({ pricePaid: purchases.pricePaid, createdAt: purchases.createdAt })
+    .from(purchases)
+    .where(and(...conditions))
+    .all();
+
+  // Resolve the effective range: explicit bounds win; otherwise derive from data.
+  let from = opts.from ?? null;
+  let to = opts.to ?? null;
+  if ((from === null || to === null) && rows.length > 0) {
+    const created = rows.map((r) => r.createdAt);
+    if (from === null) {
+      from = created.reduce((min, c) => (c < min ? c : min), created[0]);
+    }
+    if (to === null) {
+      const max = created.reduce((m, c) => (c > m ? c : m), created[0]);
+      const maxDate = new Date(max);
+      to = new Date(
+        Date.UTC(
+          maxDate.getUTCFullYear(),
+          maxDate.getUTCMonth(),
+          maxDate.getUTCDate() + 1
+        )
+      ).toISOString();
+    }
+  }
+  if (from === null || to === null) {
+    return [];
+  }
+
+  const granularity = opts.granularity ?? selectGranularity(from, to);
+  const buckets = bucketPeriods(from, to, granularity);
+
+  return buckets.map((bucket) => {
+    let revenue = 0;
+    let transactions = 0;
+    for (const row of rows) {
+      if (row.createdAt >= bucket.start && row.createdAt < bucket.end) {
+        revenue += row.pricePaid;
+        transactions += 1;
+      }
+    }
+    return {
+      label: bucket.label,
+      periodStart: bucket.start,
+      revenue,
+      transactions,
+    };
+  });
 }
 
 // Outstanding seats are a current-state snapshot (not period-scoped): coupons

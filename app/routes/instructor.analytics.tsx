@@ -8,6 +8,7 @@ import {
   getRevenueSummary,
   getOutstandingSeats,
   getRevenueByCourse,
+  getRevenueTimeSeries,
 } from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -88,6 +89,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Outstanding seats are a snapshot of all unredeemed seats, not period-scoped.
     outstandingSeats: getOutstandingSeats({ courseIds }),
     courseBreakdown: getRevenueByCourse({
+      courseIds,
+      from: range.from,
+      to: range.to,
+    }),
+    timeSeries: getRevenueTimeSeries({
       courseIds,
       from: range.from,
       to: range.to,
@@ -235,6 +241,57 @@ function CourseBreakdownTable({ courses }: { courses: CourseRow[] }) {
   );
 }
 
+interface TimePoint {
+  label: string;
+  periodStart: string;
+  revenue: number;
+  transactions: number;
+}
+
+function RevenueOverTimeTable({ points }: { points: TimePoint[] }) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Period
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Revenue
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Sales
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {points.map((point) => (
+                <tr
+                  key={point.periodStart}
+                  className="border-b border-border last:border-0"
+                >
+                  <td className="px-4 py-3 text-sm font-medium">
+                    {point.label}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {formatCents(point.revenue)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {point.transactions}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
@@ -248,6 +305,7 @@ export default function InstructorAnalytics({
     seatsSold,
     outstandingSeats,
     courseBreakdown,
+    timeSeries,
   } = loaderData;
   const periodLabel =
     range.preset === "custom"
@@ -358,6 +416,12 @@ export default function InstructorAnalytics({
           {periodLabel} · click a column to sort
         </p>
         <CourseBreakdownTable courses={courseBreakdown} />
+      </div>
+
+      <div className="mt-10">
+        <h2 className="mb-1 text-xl font-semibold">Revenue over time</h2>
+        <p className="mb-4 text-sm text-muted-foreground">{periodLabel}</p>
+        <RevenueOverTimeTable points={timeSeries} />
       </div>
     </div>
   );
