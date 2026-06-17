@@ -9,6 +9,7 @@ import {
   getOutstandingSeats,
   getRevenueByCourse,
   getRevenueTimeSeries,
+  getRevenueByCountry,
 } from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -94,6 +95,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       to: range.to,
     }),
     timeSeries: getRevenueTimeSeries({
+      courseIds,
+      from: range.from,
+      to: range.to,
+    }),
+    countryBreakdown: getRevenueByCountry({
       courseIds,
       from: range.from,
       to: range.to,
@@ -292,6 +298,54 @@ function RevenueOverTimeTable({ points }: { points: TimePoint[] }) {
   );
 }
 
+function RevenueByCountryTable({
+  rows,
+}: {
+  rows: { country: string; revenue: number; transactions: number }[];
+}) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Country
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Revenue
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Sales
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr
+                  key={row.country}
+                  className="border-b border-border last:border-0"
+                >
+                  <td className="px-4 py-3 text-sm font-medium">
+                    {row.country}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {formatCents(row.revenue)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {row.transactions}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
@@ -306,6 +360,7 @@ export default function InstructorAnalytics({
     outstandingSeats,
     courseBreakdown,
     timeSeries,
+    countryBreakdown,
   } = loaderData;
   const periodLabel =
     range.preset === "custom"
@@ -422,6 +477,12 @@ export default function InstructorAnalytics({
         <h2 className="mb-1 text-xl font-semibold">Revenue over time</h2>
         <p className="mb-4 text-sm text-muted-foreground">{periodLabel}</p>
         <RevenueOverTimeTable points={timeSeries} />
+      </div>
+
+      <div className="mt-10">
+        <h2 className="mb-1 text-xl font-semibold">Revenue by country</h2>
+        <p className="mb-4 text-sm text-muted-foreground">{periodLabel}</p>
+        <RevenueByCountryTable rows={countryBreakdown} />
       </div>
     </div>
   );

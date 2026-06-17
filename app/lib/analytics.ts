@@ -108,6 +108,22 @@ export function resolveRange(
   return resolvePreset(preset, now);
 }
 
+// ─── Country names ───
+
+import { COUNTRIES } from "~/lib/ppp";
+
+const COUNTRY_NAMES = new Map(COUNTRIES.map((c) => [c.code, c.name]));
+
+/**
+ * Map an ISO country code to its display name. Missing (`null`/empty) and
+ * unrecognized codes both resolve to "Unknown" so they bucket together in the
+ * by-country breakdown.
+ */
+export function countryName(code: string | null | undefined): string {
+  if (!code) return "Unknown";
+  return COUNTRY_NAMES.get(code.toUpperCase()) ?? "Unknown";
+}
+
 // ─── Time-series bucketing ───
 
 export type Granularity = "daily" | "weekly" | "monthly";

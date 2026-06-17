@@ -16,6 +16,7 @@ import {
   getOutstandingSeats,
   getRevenueByCourse,
   getRevenueTimeSeries,
+  getRevenueByCountry,
 } from "./analyticsService";
 
 function addPurchase(opts: {
@@ -30,7 +31,7 @@ function addPurchase(opts: {
       userId: base.user.id,
       courseId: opts.courseId,
       pricePaid: opts.pricePaid,
-      country: opts.country ?? "US",
+      country: "country" in opts ? opts.country : "US",
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning()
@@ -406,6 +407,79 @@ describe("analyticsService", () => {
     it("returns an empty array for an empty scope or no all-time data", () => {
       expect(getRevenueTimeSeries({ courseIds: [] })).toEqual([]);
       expect(getRevenueTimeSeries({ courseIds: [base.course.id] })).toEqual([]);
+    });
+  });
+
+  describe("getRevenueByCountry", () => {
+    it("groups revenue and sales by country name, sorted by revenue desc", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 1000, country: "US" });
+      addPurchase({ courseId: base.course.id, pricePaid: 2000, country: "US" });
+      addPurchase({ courseId: base.course.id, pricePaid: 5000, country: "GB" });
+
+      const rows = getRevenueByCountry({ courseIds: [base.course.id] });
+
+      expect(rows).toEqual([
+        { country: "United Kingdom", revenue: 5000, transactions: 1 },
+        { country: "United States", revenue: 3000, transactions: 2 },
+      ]);
+    });
+
+    it("buckets null and unrecognized countries under Unknown", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 1000, country: null });
+      addPurchase({ courseId: base.course.id, pricePaid: 2000, country: "ZZ" });
+      addPurchase({ courseId: base.course.id, pricePaid: 4000, country: "US" });
+
+      const rows = getRevenueByCountry({ courseIds: [base.course.id] });
+      const unknown = rows.find((r) => r.country === "Unknown");
+
+      expect(unknown).toEqual({
+        country: "Unknown",
+        revenue: 3000,
+        transactions: 2,
+      });
+    });
+
+    it("reconciles with the revenue summary total", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 1000, country: "US" });
+      addPurchase({ courseId: base.course.id, pricePaid: 2000, country: null });
+      addPurchase({ courseId: base.course.id, pricePaid: 4000, country: "IN" });
+
+      const rows = getRevenueByCountry({ courseIds: [base.course.id] });
+      const summary = getRevenueSummary({ courseIds: [base.course.id] });
+
+      const total = rows.reduce((sum, r) => sum + r.revenue, 0);
+      expect(total).toBe(summary.totalRevenue);
+    });
+
+    it("only includes in-scope courses and respects the date range", () => {
+      const other = addCourse("other-course");
+      addPurchase({ courseId: other.id, pricePaid: 9999, country: "US" });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 1000,
+        country: "US",
+        createdAt: "2020-01-01T00:00:00.000Z",
+      });
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 2000,
+        country: "US",
+        createdAt: "2026-06-01T00:00:00.000Z",
+      });
+
+      const rows = getRevenueByCountry({
+        courseIds: [base.course.id],
+        from: "2026-01-01T00:00:00.000Z",
+        to: "2026-12-31T00:00:00.000Z",
+      });
+
+      expect(rows).toEqual([
+        { country: "United States", revenue: 2000, transactions: 1 },
+      ]);
+    });
+
+    it("returns an empty array for an empty scope", () => {
+      expect(getRevenueByCountry({ courseIds: [] })).toEqual([]);
     });
   });
 

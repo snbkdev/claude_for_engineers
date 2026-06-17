@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { resolveRange, selectGranularity, bucketPeriods } from "./analytics";
+import {
+  resolveRange,
+  selectGranularity,
+  bucketPeriods,
+  countryName,
+} from "./analytics";
 
 // Fixed "now" so preset windows are deterministic. 2026-06-17 (UTC).
 const NOW = new Date("2026-06-17T12:30:00.000Z");
@@ -136,5 +141,25 @@ describe("bucketPeriods", () => {
     // First bucket snaps to the start of the month.
     expect(buckets[0].start).toBe("2026-01-01T00:00:00.000Z");
     expect(buckets[1].start).toBe("2026-02-01T00:00:00.000Z");
+  });
+});
+
+describe("countryName", () => {
+  it("maps a known ISO code to its full name", () => {
+    expect(countryName("US")).toBe("United States");
+    expect(countryName("GB")).toBe("United Kingdom");
+  });
+
+  it("is case-insensitive", () => {
+    expect(countryName("us")).toBe("United States");
+  });
+
+  it("returns Unknown for a null/empty country", () => {
+    expect(countryName(null)).toBe("Unknown");
+    expect(countryName("")).toBe("Unknown");
+  });
+
+  it("returns Unknown for an unrecognized code", () => {
+    expect(countryName("ZZ")).toBe("Unknown");
   });
 });

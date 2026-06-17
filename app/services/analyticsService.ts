@@ -4,6 +4,7 @@ import { purchases, coupons, courses } from "~/db/schema";
 import {
   selectGranularity,
   bucketPeriods,
+  countryName,
   type Granularity,
 } from "~/lib/analytics";
 
@@ -209,6 +210,55 @@ export function getRevenueTimeSeries(opts: {
       transactions,
     };
   });
+}
+
+export interface CountryRevenueRow {
+  country: string; // display name; "Unknown" for missing/unrecognized
+  revenue: number; // cents
+  transactions: number;
+}
+
+// Revenue grouped by buyer country (purchases.country). Rows group by resolved
+// display name, so a null/unrecognized country collapses into a single "Unknown"
+// row. Same counting semantics as getRevenueSummary; sorted by revenue desc.
+export function getRevenueByCountry(opts: {
+  courseIds: number[];
+  from?: string | null;
+  to?: string | null;
+}): CountryRevenueRow[] {
+  if (opts.courseIds.length === 0) {
+    return [];
+  }
+
+  const conditions: SQL[] = [
+    inArray(purchases.courseId, opts.courseIds),
+    gt(purchases.pricePaid, 0),
+  ];
+  if (opts.from) conditions.push(gte(purchases.createdAt, opts.from));
+  if (opts.to) conditions.push(lt(purchases.createdAt, opts.to));
+
+  const rows = db
+    .select({ country: purchases.country, pricePaid: purchases.pricePaid })
+    .from(purchases)
+    .where(and(...conditions))
+    .all();
+
+  const byCountry = new Map<string, { revenue: number; transactions: number }>();
+  for (const row of rows) {
+    const name = countryName(row.country);
+    const entry = byCountry.get(name) ?? { revenue: 0, transactions: 0 };
+    entry.revenue += row.pricePaid;
+    entry.transactions += 1;
+    byCountry.set(name, entry);
+  }
+
+  const result = [...byCountry.entries()].map(([country, v]) => ({
+    country,
+    revenue: v.revenue,
+    transactions: v.transactions,
+  }));
+  result.sort((a, b) => b.revenue - a.revenue);
+  return result;
 }
 
 // Outstanding seats are a current-state snapshot (not period-scoped): coupons
