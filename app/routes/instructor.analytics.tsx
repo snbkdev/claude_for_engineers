@@ -145,6 +145,25 @@ export function HydrateFallback() {
   );
 }
 
+function EmptyRow({
+  colSpan,
+  message,
+}: {
+  colSpan: number;
+  message: string;
+}) {
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        className="px-4 py-10 text-center text-sm text-muted-foreground"
+      >
+        {message}
+      </td>
+    </tr>
+  );
+}
+
 interface CourseRow {
   courseId: number;
   title: string;
@@ -220,6 +239,9 @@ function CourseBreakdownTable({ courses }: { courses: CourseRow[] }) {
               </tr>
             </thead>
             <tbody>
+              {sorted.length === 0 && (
+                <EmptyRow colSpan={4} message="No courses yet." />
+              )}
               {sorted.map((course) => (
                 <tr
                   key={course.courseId}
@@ -274,6 +296,12 @@ function RevenueOverTimeTable({ points }: { points: TimePoint[] }) {
               </tr>
             </thead>
             <tbody>
+              {points.length === 0 && (
+                <EmptyRow
+                  colSpan={3}
+                  message="No sales in the selected period."
+                />
+              )}
               {points.map((point) => (
                 <tr
                   key={point.periodStart}
@@ -322,6 +350,12 @@ function RevenueByCountryTable({
               </tr>
             </thead>
             <tbody>
+              {rows.length === 0 && (
+                <EmptyRow
+                  colSpan={3}
+                  message="No sales in the selected period."
+                />
+              )}
               {rows.map((row) => (
                 <tr
                   key={row.country}

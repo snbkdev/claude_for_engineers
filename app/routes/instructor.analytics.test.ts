@@ -195,6 +195,51 @@ describe("instructor.analytics loader", () => {
     ).toBe(40000);
   });
 
+  it("reconciles admin platform-wide totals across all views", async () => {
+    const { course2 } = addOtherInstructorCourse();
+    const recent = new Date(Date.now() - 3 * 86400_000).toISOString();
+    // Two courses, two countries, all within the default 30-day window.
+    testDb
+      .insert(schema.purchases)
+      .values([
+        {
+          userId: base.user.id,
+          courseId: base.course.id,
+          pricePaid: 4000,
+          country: "US",
+          createdAt: recent,
+        },
+        {
+          userId: base.user.id,
+          courseId: course2.id,
+          pricePaid: 6000,
+          country: "GB",
+          createdAt: recent,
+        },
+      ])
+      .run();
+
+    const admin = addAdmin();
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const result = await callLoader(request);
+
+    const courseTotal = result.courseBreakdown.reduce(
+      (s, c) => s + c.revenue,
+      0
+    );
+    const timeTotal = result.timeSeries.reduce((s, p) => s + p.revenue, 0);
+    const countryTotal = result.countryBreakdown.reduce(
+      (s, r) => s + r.revenue,
+      0
+    );
+
+    expect(result.scope).toBe("platform");
+    expect(result.periodRevenue).toBe(10000);
+    expect(courseTotal).toBe(10000);
+    expect(timeTotal).toBe(10000);
+    expect(countryTotal).toBe(10000);
+  });
+
   it("scopes the per-course breakdown by role", async () => {
     const { course2 } = addOtherInstructorCourse();
     addPurchase(base.course.id, 4999);
