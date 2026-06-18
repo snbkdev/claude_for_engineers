@@ -1,7 +1,16 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "~/db";
-import { coupons, purchases, enrollments } from "~/db/schema";
+import {
+  coupons,
+  purchases,
+  enrollments,
+  courses,
+  users,
+  NotificationType,
+} from "~/db/schema";
 import crypto from "crypto";
+import { createNotification } from "./notificationService";
+import { getTeamAdmins } from "./teamService";
 
 // ─── Coupon Service ───
 // Handles coupon generation, redemption (with validation), and listing.
@@ -45,7 +54,10 @@ export function getCouponsForTeam(opts: { teamId: number; courseId?: number }) {
       .select()
       .from(coupons)
       .where(
-        and(eq(coupons.teamId, opts.teamId), eq(coupons.courseId, opts.courseId))
+        and(
+          eq(coupons.teamId, opts.teamId),
+          eq(coupons.courseId, opts.courseId)
+        )
       )
       .all();
   }
@@ -118,5 +130,70 @@ export function redeemCoupon(opts: {
     .returning()
     .get();
 
+  // Notify every team admin that a seat was claimed.
+  notifyTeamAdminsOfRedemption({
+    teamId: coupon.teamId,
+    courseId: coupon.courseId,
+    redeemerUserId: opts.userId,
+  });
+
   return { ok: true, enrollment };
+}
+
+function notifyTeamAdminsOfRedemption(opts: {
+  teamId: number;
+  courseId: number;
+  redeemerUserId: number;
+}) {
+  const admins = getTeamAdmins(opts.teamId);
+  if (admins.length === 0) return;
+
+  const redeemer = db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, opts.redeemerUserId))
+    .get();
+  const course = db
+    .select({ title: courses.title })
+    .from(courses)
+    .where(eq(courses.id, opts.courseId))
+    .get();
+  if (!redeemer || !course) return;
+
+  // Per-course seat counts for this team, as of right after the redemption.
+  const totalSeats =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(coupons)
+      .where(
+        and(
+          eq(coupons.teamId, opts.teamId),
+          eq(coupons.courseId, opts.courseId)
+        )
+      )
+      .get()?.count ?? 0;
+  const remainingSeats =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(coupons)
+      .where(
+        and(
+          eq(coupons.teamId, opts.teamId),
+          eq(coupons.courseId, opts.courseId),
+          isNull(coupons.redeemedByUserId)
+        )
+      )
+      .get()?.count ?? 0;
+
+  const message = `${redeemer.name} redeemed a coupon for ${course.title} (${remainingSeats} of ${totalSeats} seats remaining)`;
+
+  for (const admin of admins) {
+    createNotification(
+      admin.userId,
+      NotificationType.CouponRedemption,
+      "Seat Claimed",
+      message,
+      "/team"
+    );
+  }
 }

@@ -51,10 +51,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
     : [];
 
-  // Notifications are an instructor-only feature for now.
+  // Notifications go to instructors (enrollments) and team admins (coupon
+  // redemptions); a user who is both sees both kinds in one bell.
   const isInstructor = currentUser?.role === UserRole.Instructor;
+  const userIsTeamAdmin = currentUserId ? isTeamAdmin(currentUserId) : false;
+  const canSeeNotifications = isInstructor || userIsTeamAdmin;
   const notifications =
-    currentUserId && isInstructor
+    currentUserId && canSeeNotifications
       ? getNotifications(currentUserId, 5, 0).map((n) => ({
           id: n.id,
           title: n.title,
@@ -65,7 +68,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }))
       : [];
   const unreadNotificationCount =
-    currentUserId && isInstructor ? getUnreadCount(currentUserId) : 0;
+    currentUserId && canSeeNotifications ? getUnreadCount(currentUserId) : 0;
 
   return {
     users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
@@ -81,7 +84,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     devCountry,
     countryTierInfo,
     countries: COUNTRIES,
-    isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
+    isTeamAdmin: userIsTeamAdmin,
     notifications,
     unreadNotificationCount,
   };

@@ -113,7 +113,8 @@ export function Sidebar({
   unreadNotificationCount = 0,
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
-  const showNotifications = currentUserRole === UserRole.Instructor;
+  const showNotifications =
+    currentUserRole === UserRole.Instructor || isTeamAdmin;
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
