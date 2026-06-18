@@ -150,4 +150,31 @@ describe("admin.analytics loader", () => {
     expect(result.range.preset).toBe("30d");
     expect(result.totalRevenue).toBe(4999);
   });
+
+  it("returns timeSeries with daily buckets for a 7d period", async () => {
+    const recent = new Date(Date.now() - 2 * 86400_000).toISOString();
+    addPurchase(base.course.id, 4999, recent);
+    const admin = addAdmin();
+
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const result = await callLoader(requestWith("?preset=7d"));
+
+    expect(Array.isArray(result.timeSeries)).toBe(true);
+    expect(result.timeSeries.length).toBe(7);
+    const totalInSeries = result.timeSeries.reduce(
+      (sum: number, p: { revenue: number }) => sum + p.revenue,
+      0
+    );
+    expect(totalInSeries).toBe(4999);
+  });
+
+  it("returns empty timeSeries when there are no sales", async () => {
+    addEnrollment(base.course.id);
+    const admin = addAdmin();
+
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const result = await callLoader(requestWith("?preset=all"));
+
+    expect(result.timeSeries).toEqual([]);
+  });
 });

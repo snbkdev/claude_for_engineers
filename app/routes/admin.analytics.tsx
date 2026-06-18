@@ -7,6 +7,7 @@ import {
   getRevenueSummary,
   getEnrollmentCount,
   getTopEarningCourse,
+  getRevenueTimeSeries,
 } from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -18,6 +19,7 @@ import {
   Users,
   Trophy,
   BarChart3,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import { formatCents } from "~/lib/utils";
@@ -68,6 +70,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     from: range.from,
     to: range.to,
   });
+  const timeSeries = getRevenueTimeSeries({
+    courseIds,
+    from: range.from,
+    to: range.to,
+  });
 
   return {
     range: {
@@ -76,6 +83,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     totalRevenue: period.totalRevenue,
     totalEnrollments: enrollmentCount,
     topCourse,
+    timeSeries,
   };
 }
 
@@ -112,6 +120,67 @@ function Kpi({
   );
 }
 
+interface TimePoint {
+  label: string;
+  periodStart: string;
+  revenue: number;
+  transactions: number;
+}
+
+function RevenueOverTimeTable({ points }: { points: TimePoint[] }) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Period
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Revenue
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Sales
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {points.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-10 text-center text-sm text-muted-foreground"
+                  >
+                    No sales in the selected period.
+                  </td>
+                </tr>
+              )}
+              {points.map((point) => (
+                <tr
+                  key={point.periodStart}
+                  className="border-b border-border last:border-0"
+                >
+                  <td className="px-4 py-3 text-sm font-medium">
+                    {point.label}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {formatCents(point.revenue)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {point.transactions}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function HydrateFallback() {
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -127,7 +196,8 @@ export function HydrateFallback() {
 }
 
 export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
-  const { range, totalRevenue, totalEnrollments, topCourse } = loaderData;
+  const { range, totalRevenue, totalEnrollments, topCourse, timeSeries } =
+    loaderData;
   const periodLabel = PRESET_LABELS[range.preset as RangePreset] ?? "Selected";
   const hasData = totalRevenue > 0 || totalEnrollments > 0;
 
@@ -165,24 +235,35 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
       </div>
 
       {hasData ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <Kpi
-            label={`Total revenue · ${periodLabel}`}
-            value={formatCents(totalRevenue)}
-            icon={DollarSign}
-          />
-          <Kpi
-            label={`Total enrollments · ${periodLabel}`}
-            value={String(totalEnrollments)}
-            icon={Users}
-          />
-          <Kpi
-            label="Top earning course"
-            value={topCourse ? topCourse.title : "—"}
-            sub={topCourse ? formatCents(topCourse.revenue) : "No sales yet"}
-            icon={Trophy}
-          />
-        </div>
+        <>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <Kpi
+              label={`Total revenue · ${periodLabel}`}
+              value={formatCents(totalRevenue)}
+              icon={DollarSign}
+            />
+            <Kpi
+              label={`Total enrollments · ${periodLabel}`}
+              value={String(totalEnrollments)}
+              icon={Users}
+            />
+            <Kpi
+              label="Top earning course"
+              value={topCourse ? topCourse.title : "—"}
+              sub={topCourse ? formatCents(topCourse.revenue) : "No sales yet"}
+              icon={Trophy}
+            />
+          </div>
+
+          <div className="mt-10">
+            <h2 className="mb-1 text-xl font-semibold">Revenue over time</h2>
+            <p className="mb-4 text-sm text-muted-foreground">
+              <TrendingUp className="mr-1 inline-block size-4" />
+              {periodLabel} · combined across all courses
+            </p>
+            <RevenueOverTimeTable points={timeSeries} />
+          </div>
+        </>
       ) : (
         <Card>
           <CardContent className="py-16 text-center">
