@@ -13,6 +13,11 @@ import {
 } from "~/services/progressService";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { isTeamAdmin } from "~/services/teamService";
+import {
+  getNotifications,
+  getUnreadCount,
+} from "~/services/notificationService";
+import { UserRole } from "~/db/schema";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const users = getAllUsers();
@@ -46,6 +51,22 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
     : [];
 
+  // Notifications are an instructor-only feature for now.
+  const isInstructor = currentUser?.role === UserRole.Instructor;
+  const notifications =
+    currentUserId && isInstructor
+      ? getNotifications(currentUserId, 5, 0).map((n) => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          linkUrl: n.linkUrl,
+          isRead: n.isRead,
+          createdAt: n.createdAt,
+        }))
+      : [];
+  const unreadNotificationCount =
+    currentUserId && isInstructor ? getUnreadCount(currentUserId) : 0;
+
   return {
     users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
     currentUser: currentUser
@@ -61,6 +82,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     countryTierInfo,
     countries: COUNTRIES,
     isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
+    notifications,
+    unreadNotificationCount,
   };
 }
 
@@ -73,6 +96,8 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countryTierInfo,
     countries,
     isTeamAdmin: userIsTeamAdmin,
+    notifications,
+    unreadNotificationCount,
   } = loaderData;
 
   return (
@@ -81,6 +106,8 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
         currentUser={currentUser}
         recentCourses={recentCourses}
         isTeamAdmin={userIsTeamAdmin}
+        notifications={notifications}
+        unreadNotificationCount={unreadNotificationCount}
       />
       <main className="flex-1 overflow-y-auto">
         <Outlet />
