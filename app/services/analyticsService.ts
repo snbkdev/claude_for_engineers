@@ -1,6 +1,15 @@
-import { inArray, and, gt, gte, lt, isNull, count, type SQL } from "drizzle-orm";
+import {
+  inArray,
+  and,
+  gt,
+  gte,
+  lt,
+  isNull,
+  count,
+  type SQL,
+} from "drizzle-orm";
 import { db } from "~/db";
-import { purchases, coupons, courses } from "~/db/schema";
+import { purchases, coupons, courses, enrollments } from "~/db/schema";
 import {
   selectGranularity,
   bucketPeriods,
@@ -243,7 +252,10 @@ export function getRevenueByCountry(opts: {
     .where(and(...conditions))
     .all();
 
-  const byCountry = new Map<string, { revenue: number; transactions: number }>();
+  const byCountry = new Map<
+    string,
+    { revenue: number; transactions: number }
+  >();
   for (const row of rows) {
     const name = countryName(row.country);
     const entry = byCountry.get(name) ?? { revenue: 0, transactions: 0 };
@@ -259,6 +271,52 @@ export function getRevenueByCountry(opts: {
   }));
   result.sort((a, b) => b.revenue - a.revenue);
   return result;
+}
+
+// Total enrollments across the in-scope courses, optionally filtered to a
+// period on enrollments.enrolledAt (inclusive `from`, exclusive `to`). Unlike
+// revenue, every enrollment counts (free enrollments included).
+export function getEnrollmentCount(opts: {
+  courseIds: number[];
+  from?: string | null;
+  to?: string | null;
+}): number {
+  if (opts.courseIds.length === 0) {
+    return 0;
+  }
+
+  const conditions: SQL[] = [inArray(enrollments.courseId, opts.courseIds)];
+  if (opts.from) conditions.push(gte(enrollments.enrolledAt, opts.from));
+  if (opts.to) conditions.push(lt(enrollments.enrolledAt, opts.to));
+
+  const row = db
+    .select({ total: count() })
+    .from(enrollments)
+    .where(and(...conditions))
+    .get();
+
+  return Number(row?.total ?? 0);
+}
+
+export interface TopCourse {
+  courseId: number;
+  title: string;
+  revenue: number; // cents
+}
+
+// The single highest-earning in-scope course for the period, or null when no
+// course has any revenue. Reuses getRevenueByCourse (sorted by revenue desc) so
+// the counting semantics stay identical to the per-course breakdown.
+export function getTopEarningCourse(opts: {
+  courseIds: number[];
+  from?: string | null;
+  to?: string | null;
+}): TopCourse | null {
+  const top = getRevenueByCourse(opts)[0];
+  if (!top || top.revenue <= 0) {
+    return null;
+  }
+  return { courseId: top.courseId, title: top.title, revenue: top.revenue };
 }
 
 // Outstanding seats are a current-state snapshot (not period-scoped): coupons

@@ -17,7 +17,21 @@ import {
   getRevenueByCourse,
   getRevenueTimeSeries,
   getRevenueByCountry,
+  getEnrollmentCount,
+  getTopEarningCourse,
 } from "./analyticsService";
+
+function addEnrollment(opts: { courseId: number; enrolledAt?: string }) {
+  return testDb
+    .insert(schema.enrollments)
+    .values({
+      userId: base.user.id,
+      courseId: opts.courseId,
+      ...(opts.enrolledAt ? { enrolledAt: opts.enrolledAt } : {}),
+    })
+    .returning()
+    .get();
+}
 
 function addPurchase(opts: {
   courseId: number;
@@ -517,6 +531,90 @@ describe("analyticsService", () => {
 
     it("returns 0 for an empty scope", () => {
       expect(getOutstandingSeats({ courseIds: [] })).toBe(0);
+    });
+  });
+
+  describe("getEnrollmentCount", () => {
+    it("counts enrollments for the in-scope courses", () => {
+      addEnrollment({ courseId: base.course.id });
+      addEnrollment({ courseId: base.course.id });
+
+      expect(getEnrollmentCount({ courseIds: [base.course.id] })).toBe(2);
+    });
+
+    it("ignores enrollments for courses outside the scope", () => {
+      const other = addCourse("other-course");
+      addEnrollment({ courseId: base.course.id });
+      addEnrollment({ courseId: other.id });
+
+      expect(getEnrollmentCount({ courseIds: [base.course.id] })).toBe(1);
+    });
+
+    it("filters by the enrolledAt date range", () => {
+      addEnrollment({
+        courseId: base.course.id,
+        enrolledAt: "2024-06-15T00:00:00.000Z",
+      });
+      addEnrollment({
+        courseId: base.course.id,
+        enrolledAt: "2020-01-01T00:00:00.000Z",
+      });
+
+      expect(
+        getEnrollmentCount({
+          courseIds: [base.course.id],
+          from: "2024-01-01T00:00:00.000Z",
+          to: "2025-01-01T00:00:00.000Z",
+        })
+      ).toBe(1);
+    });
+
+    it("returns 0 for an empty scope", () => {
+      expect(getEnrollmentCount({ courseIds: [] })).toBe(0);
+    });
+  });
+
+  describe("getTopEarningCourse", () => {
+    it("returns the highest-earning course across the scope", () => {
+      const other = addCourse("other-course");
+      addPurchase({ courseId: base.course.id, pricePaid: 4999 });
+      addPurchase({ courseId: other.id, pricePaid: 9999 });
+
+      const top = getTopEarningCourse({
+        courseIds: [base.course.id, other.id],
+      });
+
+      expect(top).toEqual({
+        courseId: other.id,
+        title: `Course other-course`,
+        revenue: 9999,
+      });
+    });
+
+    it("returns null when no in-scope course has revenue", () => {
+      addPurchase({ courseId: base.course.id, pricePaid: 0 });
+
+      expect(getTopEarningCourse({ courseIds: [base.course.id] })).toBeNull();
+    });
+
+    it("respects the date range", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 4999,
+        createdAt: "2020-01-01T00:00:00.000Z",
+      });
+
+      expect(
+        getTopEarningCourse({
+          courseIds: [base.course.id],
+          from: "2024-01-01T00:00:00.000Z",
+          to: "2025-01-01T00:00:00.000Z",
+        })
+      ).toBeNull();
+    });
+
+    it("returns null for an empty scope", () => {
+      expect(getTopEarningCourse({ courseIds: [] })).toBeNull();
     });
   });
 });
