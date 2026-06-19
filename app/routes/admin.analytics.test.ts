@@ -41,16 +41,28 @@ function addAdmin() {
     .get();
 }
 
-function addCourse(slug: string) {
+function addCourse(slug: string, instructorId?: number) {
   return testDb
     .insert(schema.courses)
     .values({
       title: `Course ${slug}`,
       slug,
       description: "Another course",
-      instructorId: base.instructor.id,
+      instructorId: instructorId ?? base.instructor.id,
       categoryId: base.category.id,
       status: schema.CourseStatus.Published,
+    })
+    .returning()
+    .get();
+}
+
+function addInstructor(name: string) {
+  return testDb
+    .insert(schema.users)
+    .values({
+      name,
+      email: `${name.toLowerCase().replace(/\s+/g, "-")}@example.com`,
+      role: schema.UserRole.Instructor,
     })
     .returning()
     .get();
@@ -176,5 +188,49 @@ describe("admin.analytics loader", () => {
     const result = await callLoader(requestWith("?preset=all"));
 
     expect(result.timeSeries).toEqual([]);
+  });
+
+  it("returns a course breakdown row for every course by default", async () => {
+    const other = addCourse("other-course");
+    addPurchase(base.course.id, 4999);
+    addPurchase(other.id, 9999);
+    const admin = addAdmin();
+
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const result = await callLoader(requestWith("?preset=all"));
+
+    expect(result.courseBreakdown).toHaveLength(2);
+    expect(result.courseBreakdown[0].courseId).toBe(other.id);
+  });
+
+  it("lists instructors who have at least one course", async () => {
+    const otherInstructor = addInstructor("Other Instructor");
+    addCourse("other-course", otherInstructor.id);
+    const admin = addAdmin();
+
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const result = await callLoader(requestWith("?preset=all"));
+
+    expect(result.instructors.map((i) => i.name).sort()).toEqual([
+      "Other Instructor",
+      base.instructor.name,
+    ]);
+  });
+
+  it("filters the course breakdown to the selected instructor", async () => {
+    const otherInstructor = addInstructor("Other Instructor");
+    const other = addCourse("other-course", otherInstructor.id);
+    addPurchase(base.course.id, 4999);
+    addPurchase(other.id, 9999);
+    const admin = addAdmin();
+
+    getCurrentUserIdMock.mockResolvedValue(admin.id);
+    const result = await callLoader(
+      requestWith(`?preset=all&instructorId=${otherInstructor.id}`)
+    );
+
+    expect(result.courseBreakdown).toHaveLength(1);
+    expect(result.courseBreakdown[0].courseId).toBe(other.id);
+    expect(result.selectedInstructorId).toBe(otherInstructor.id);
   });
 });

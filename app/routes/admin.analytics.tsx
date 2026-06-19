@@ -1,18 +1,27 @@
-import { Link, data, isRouteErrorResponse } from "react-router";
+import { Link, data, isRouteErrorResponse, useNavigate } from "react-router";
 import type { Route } from "./+types/admin.analytics";
 import { getCurrentUserId } from "~/lib/session";
-import { getUserById } from "~/services/userService";
+import { getUserById, getUsersByRole } from "~/services/userService";
 import { getAllCourses } from "~/services/courseService";
 import {
   getRevenueSummary,
   getEnrollmentCount,
   getTopEarningCourse,
   getRevenueTimeSeries,
+  getCourseBreakdown,
+  type CourseBreakdownRow,
 } from "~/services/analyticsService";
 import { UserRole } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import {
   AlertTriangle,
   DollarSign,
@@ -51,9 +60,23 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   // Platform scope: every course, across all instructors.
-  const courseIds = getAllCourses().map((course) => course.id);
+  const allCourses = getAllCourses();
+  const courseIds = allCourses.map((course) => course.id);
 
-  const range = resolveRange(new URL(request.url).searchParams);
+  const searchParams = new URL(request.url).searchParams;
+  const range = resolveRange(searchParams);
+
+  const instructorIdParam = searchParams.get("instructorId");
+  const selectedInstructorId = instructorIdParam
+    ? Number(instructorIdParam)
+    : null;
+
+  const instructorIdsWithCourses = new Set(
+    allCourses.map((course) => course.instructorId)
+  );
+  const instructors = getUsersByRole(UserRole.Instructor)
+    .filter((instructor) => instructorIdsWithCourses.has(instructor.id))
+    .map((instructor) => ({ id: instructor.id, name: instructor.name }));
 
   const period = getRevenueSummary({
     courseIds,
@@ -75,6 +98,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     from: range.from,
     to: range.to,
   });
+  const courseBreakdown = getCourseBreakdown({
+    courseIds,
+    instructorId: selectedInstructorId,
+    from: range.from,
+    to: range.to,
+  });
 
   return {
     range: {
@@ -84,6 +113,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     totalEnrollments: enrollmentCount,
     topCourse,
     timeSeries,
+    instructors,
+    selectedInstructorId,
+    courseBreakdown,
   };
 }
 
@@ -181,6 +213,80 @@ function RevenueOverTimeTable({ points }: { points: TimePoint[] }) {
   );
 }
 
+function CourseBreakdownTable({ rows }: { rows: CourseBreakdownRow[] }) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Course
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Instructor
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  List price
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Revenue
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Sales
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Enrollments
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Rating
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-4 py-10 text-center text-sm text-muted-foreground"
+                  >
+                    No courses found.
+                  </td>
+                </tr>
+              )}
+              {rows.map((row) => (
+                <tr
+                  key={row.courseId}
+                  className="border-b border-border last:border-0"
+                >
+                  <td className="px-4 py-3 text-sm font-medium">{row.title}</td>
+                  <td className="px-4 py-3 text-sm">{row.instructorName}</td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {formatCents(row.listPrice)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {formatCents(row.revenue)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">{row.sales}</td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {row.enrollments}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm">
+                    {row.averageRating !== null
+                      ? `${row.averageRating.toFixed(1)} (${row.ratingCount})`
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function HydrateFallback() {
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -196,10 +302,29 @@ export function HydrateFallback() {
 }
 
 export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
-  const { range, totalRevenue, totalEnrollments, topCourse, timeSeries } =
-    loaderData;
+  const {
+    range,
+    totalRevenue,
+    totalEnrollments,
+    topCourse,
+    timeSeries,
+    instructors,
+    selectedInstructorId,
+    courseBreakdown,
+  } = loaderData;
   const periodLabel = PRESET_LABELS[range.preset as RangePreset] ?? "Selected";
   const hasData = totalRevenue > 0 || totalEnrollments > 0;
+  const navigate = useNavigate();
+
+  function handleInstructorChange(value: string) {
+    const params = new URLSearchParams(window.location.search);
+    if (value === "all") {
+      params.delete("instructorId");
+    } else {
+      params.set("instructorId", value);
+    }
+    navigate(`?${params.toString()}`, { preventScrollReset: true });
+  }
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -262,6 +387,39 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
               {periodLabel} · combined across all courses
             </p>
             <RevenueOverTimeTable points={timeSeries} />
+          </div>
+
+          <div className="mt-10">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold">Courses</h2>
+                <p className="text-sm text-muted-foreground">
+                  {periodLabel} · revenue, sales, and enrollments per course
+                </p>
+              </div>
+              <Select
+                value={
+                  selectedInstructorId ? String(selectedInstructorId) : "all"
+                }
+                onValueChange={handleInstructorChange}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="All instructors" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All instructors</SelectItem>
+                  {instructors.map((instructor) => (
+                    <SelectItem
+                      key={instructor.id}
+                      value={String(instructor.id)}
+                    >
+                      {instructor.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <CourseBreakdownTable rows={courseBreakdown} />
           </div>
         </>
       ) : (

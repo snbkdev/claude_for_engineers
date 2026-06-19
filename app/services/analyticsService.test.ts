@@ -19,6 +19,7 @@ import {
   getRevenueByCountry,
   getEnrollmentCount,
   getTopEarningCourse,
+  getCourseBreakdown,
 } from "./analyticsService";
 
 function addEnrollment(opts: { courseId: number; enrolledAt?: string }) {
@@ -84,16 +85,28 @@ function addTeamPurchase(opts: {
   return purchase;
 }
 
-function addCourse(slug: string) {
+function addCourse(slug: string, instructorId?: number) {
   return testDb
     .insert(schema.courses)
     .values({
       title: `Course ${slug}`,
       slug,
       description: "Another course",
-      instructorId: base.instructor.id,
+      instructorId: instructorId ?? base.instructor.id,
       categoryId: base.category.id,
       status: schema.CourseStatus.Published,
+    })
+    .returning()
+    .get();
+}
+
+function addInstructor(name: string) {
+  return testDb
+    .insert(schema.users)
+    .values({
+      name,
+      email: `${name.toLowerCase().replace(/\s+/g, "-")}@example.com`,
+      role: schema.UserRole.Instructor,
     })
     .returning()
     .get();
@@ -615,6 +628,98 @@ describe("analyticsService", () => {
 
     it("returns null for an empty scope", () => {
       expect(getTopEarningCourse({ courseIds: [] })).toBeNull();
+    });
+  });
+
+  describe("getCourseBreakdown", () => {
+    it("includes every in-scope course with revenue, sales, and enrollments", () => {
+      const other = addCourse("other-course");
+      addPurchase({ courseId: base.course.id, pricePaid: 4999 });
+      addEnrollment({ courseId: base.course.id });
+      addEnrollment({ courseId: other.id });
+
+      const rows = getCourseBreakdown({
+        courseIds: [base.course.id, other.id],
+      });
+
+      expect(rows).toHaveLength(2);
+      const baseRow = rows.find((r) => r.courseId === base.course.id);
+      expect(baseRow).toMatchObject({
+        title: base.course.title,
+        instructorId: base.instructor.id,
+        instructorName: base.instructor.name,
+        revenue: 4999,
+        sales: 1,
+        enrollments: 1,
+      });
+      const otherRow = rows.find((r) => r.courseId === other.id);
+      expect(otherRow).toMatchObject({ revenue: 0, sales: 0, enrollments: 1 });
+    });
+
+    it("sorts by revenue descending", () => {
+      const other = addCourse("other-course");
+      addPurchase({ courseId: base.course.id, pricePaid: 1000 });
+      addPurchase({ courseId: other.id, pricePaid: 9999 });
+
+      const rows = getCourseBreakdown({
+        courseIds: [base.course.id, other.id],
+      });
+
+      expect(rows.map((r) => r.courseId)).toEqual([other.id, base.course.id]);
+    });
+
+    it("filters to a single instructor when instructorId is given", () => {
+      const otherInstructor = addInstructor("Other Instructor");
+      const other = addCourse("other-course", otherInstructor.id);
+
+      const rows = getCourseBreakdown({
+        courseIds: [base.course.id, other.id],
+        instructorId: otherInstructor.id,
+      });
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].courseId).toBe(other.id);
+      expect(rows[0].instructorName).toBe("Other Instructor");
+    });
+
+    it("includes list price and average rating", () => {
+      testDb
+        .insert(schema.courseRatings)
+        .values({ userId: base.user.id, courseId: base.course.id, rating: 4 })
+        .run();
+
+      const rows = getCourseBreakdown({ courseIds: [base.course.id] });
+
+      expect(rows[0].listPrice).toBe(base.course.price);
+      expect(rows[0].averageRating).toBe(4);
+      expect(rows[0].ratingCount).toBe(1);
+    });
+
+    it("returns averageRating null when there are no ratings", () => {
+      const rows = getCourseBreakdown({ courseIds: [base.course.id] });
+
+      expect(rows[0].averageRating).toBeNull();
+      expect(rows[0].ratingCount).toBe(0);
+    });
+
+    it("respects the date range for revenue and enrollments", () => {
+      addPurchase({
+        courseId: base.course.id,
+        pricePaid: 4999,
+        createdAt: "2020-01-01T00:00:00.000Z",
+      });
+
+      const rows = getCourseBreakdown({
+        courseIds: [base.course.id],
+        from: "2024-01-01T00:00:00.000Z",
+        to: "2025-01-01T00:00:00.000Z",
+      });
+
+      expect(rows[0].revenue).toBe(0);
+    });
+
+    it("returns an empty array for an empty scope", () => {
+      expect(getCourseBreakdown({ courseIds: [] })).toEqual([]);
     });
   });
 });

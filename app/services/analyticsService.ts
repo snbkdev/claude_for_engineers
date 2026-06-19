@@ -1,6 +1,7 @@
 import {
   inArray,
   and,
+  eq,
   gt,
   gte,
   lt,
@@ -9,13 +10,14 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "~/db";
-import { purchases, coupons, courses, enrollments } from "~/db/schema";
+import { purchases, coupons, courses, enrollments, users } from "~/db/schema";
 import {
   selectGranularity,
   bucketPeriods,
   countryName,
   type Granularity,
 } from "~/lib/analytics";
+import { getAverageRatingsForCourses } from "~/services/ratingService";
 
 // ─── Analytics Service ───
 // Aggregates revenue from purchases, scoped by a list of course IDs. The service
@@ -317,6 +319,87 @@ export function getTopEarningCourse(opts: {
     return null;
   }
   return { courseId: top.courseId, title: top.title, revenue: top.revenue };
+}
+
+export interface CourseBreakdownRow {
+  courseId: number;
+  title: string;
+  instructorId: number;
+  instructorName: string;
+  listPrice: number; // cents
+  revenue: number; // cents
+  sales: number;
+  enrollments: number;
+  averageRating: number | null;
+  ratingCount: number;
+}
+
+// Per-course breakdown for the in-scope courses, optionally narrowed to a
+// single instructor. Every matching course is included even with no sales.
+// Same revenue counting semantics as getRevenueSummary; rows sorted by
+// revenue descending.
+export function getCourseBreakdown(opts: {
+  courseIds: number[];
+  instructorId?: number | null;
+  from?: string | null;
+  to?: string | null;
+}): CourseBreakdownRow[] {
+  if (opts.courseIds.length === 0) {
+    return [];
+  }
+
+  const conditions: SQL[] = [inArray(courses.id, opts.courseIds)];
+  if (opts.instructorId) {
+    conditions.push(eq(courses.instructorId, opts.instructorId));
+  }
+
+  const courseRows = db
+    .select({
+      id: courses.id,
+      title: courses.title,
+      instructorId: courses.instructorId,
+      instructorName: users.name,
+      price: courses.price,
+    })
+    .from(courses)
+    .innerJoin(users, eq(courses.instructorId, users.id))
+    .where(and(...conditions))
+    .all();
+
+  if (courseRows.length === 0) {
+    return [];
+  }
+
+  const ratings = getAverageRatingsForCourses(courseRows.map((c) => c.id));
+
+  const rows = courseRows.map((course) => {
+    const summary = getRevenueSummary({
+      courseIds: [course.id],
+      from: opts.from,
+      to: opts.to,
+    });
+    const enrollmentCount = getEnrollmentCount({
+      courseIds: [course.id],
+      from: opts.from,
+      to: opts.to,
+    });
+    const rating = ratings.get(course.id);
+    return {
+      courseId: course.id,
+      title: course.title,
+      instructorId: course.instructorId,
+      instructorName: course.instructorName,
+      listPrice: course.price,
+      revenue: summary.totalRevenue,
+      sales: summary.transactionCount,
+      enrollments: enrollmentCount,
+      averageRating: rating?.average ?? null,
+      ratingCount: rating?.count ?? 0,
+    };
+  });
+
+  rows.sort((a, b) => b.revenue - a.revenue);
+  return rows;
 }
 
 // Outstanding seats are a current-state snapshot (not period-scoped): coupons
