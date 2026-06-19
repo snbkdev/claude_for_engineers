@@ -98,6 +98,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     from: range.from,
     to: range.to,
   });
+  // The table is always grouped by month; the chart keeps auto granularity.
+  const timeSeriesMonthly = getRevenueTimeSeries({
+    courseIds,
+    from: range.from,
+    to: range.to,
+    granularity: "monthly",
+  });
   const courseBreakdown = getCourseBreakdown({
     courseIds,
     instructorId: selectedInstructorId,
@@ -113,6 +120,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     totalEnrollments: enrollmentCount,
     topCourse,
     timeSeries,
+    timeSeriesMonthly,
     instructors,
     selectedInstructorId,
     courseBreakdown,
@@ -207,6 +215,76 @@ function RevenueOverTimeTable({ points }: { points: TimePoint[] }) {
               ))}
             </tbody>
           </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RevenueOverTimeChart({ points }: { points: TimePoint[] }) {
+  const maxRevenue = Math.max(0, ...points.map((point) => point.revenue));
+
+  if (points.length === 0 || maxRevenue === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          No revenue to chart in the selected period.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // A cycling palette so adjacent bars read as distinct, colorful bars.
+  const BAR_GRADIENTS = [
+    "from-violet-500 to-fuchsia-400",
+    "from-sky-500 to-cyan-400",
+    "from-emerald-500 to-teal-400",
+    "from-amber-500 to-orange-400",
+    "from-rose-500 to-pink-400",
+    "from-indigo-500 to-blue-400",
+  ];
+
+  const totalRevenue = points.reduce((sum, point) => sum + point.revenue, 0);
+
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <div className="mb-4 flex items-baseline justify-between">
+          <span className="text-sm font-medium text-muted-foreground">
+            Revenue per period
+          </span>
+          <span className="text-sm font-semibold">
+            {formatCents(totalRevenue)} total
+          </span>
+        </div>
+        <div className="flex h-64 items-stretch gap-2 overflow-x-auto pt-6">
+          {points.map((point, index) => {
+            const heightPct = (point.revenue / maxRevenue) * 100;
+            const gradient = BAR_GRADIENTS[index % BAR_GRADIENTS.length];
+            return (
+              <div
+                key={point.periodStart}
+                className="group flex h-full min-w-[2.25rem] flex-1 flex-col items-center gap-2"
+              >
+                <div className="flex w-full flex-1 flex-col justify-end">
+                  {/* Value label, revealed on hover */}
+                  <span className="mb-1 text-center text-[10px] font-semibold tabular-nums text-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                    {formatCents(point.revenue)}
+                  </span>
+                  <div
+                    className={`w-full rounded-t-md bg-gradient-to-t ${gradient} shadow-sm ring-1 ring-inset ring-white/10 transition-all duration-300 group-hover:brightness-110`}
+                    style={{ height: `${Math.max(heightPct, 2)}%` }}
+                    role="img"
+                    aria-label={`${point.label}: ${formatCents(point.revenue)}, ${point.transactions} sales`}
+                    title={`${point.label}\n${formatCents(point.revenue)} · ${point.transactions} sales`}
+                  />
+                </div>
+                <span className="w-full truncate text-center text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+                  {point.label}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </CardContent>
     </Card>
@@ -308,6 +386,7 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
     totalEnrollments,
     topCourse,
     timeSeries,
+    timeSeriesMonthly,
     instructors,
     selectedInstructorId,
     courseBreakdown,
@@ -386,7 +465,10 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
               <TrendingUp className="mr-1 inline-block size-4" />
               {periodLabel} · combined across all courses
             </p>
-            <RevenueOverTimeTable points={timeSeries} />
+            <RevenueOverTimeTable points={timeSeriesMonthly} />
+            <div className="mt-4">
+              <RevenueOverTimeChart points={timeSeries} />
+            </div>
           </div>
 
           <div className="mt-10">
