@@ -48,6 +48,9 @@ export default [
   ]),
   route("signup", "routes/signup.tsx"),
   route("login", "routes/login.tsx"),
+  // ─── Dev-only throwaway prototype (live presence indicator) ───
+  route("dev/presence", "routes/dev.presence.tsx"),
+  route("api/dev/presence/:roomId", "routes/api.dev.presence.$roomId.ts"),
   route("api/switch-user", "routes/api.switch-user.ts"),
   route("api/logout", "routes/api.logout.ts"),
   route("api/video-tracking", "routes/api.video-tracking.ts"),
