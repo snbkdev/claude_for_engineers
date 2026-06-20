@@ -140,6 +140,30 @@ function completeLessonTx(
   return true;
 }
 
+// ─── Attempt limit ───
+// A quiz allows one initial attempt plus a fixed number of retakes. Once the cap
+// is reached the quiz can no longer be submitted (whether or not it was passed),
+// so a student who keeps failing eventually runs out of chances at the
+// certificate.
+export const MAX_QUIZ_ATTEMPTS = 7; // 1 initial attempt + 6 retakes
+
+export function countQuizAttempts(opts: {
+  userId: number;
+  quizId: number;
+}): number {
+  const row = db
+    .select({ count: sql<number>`count(*)` })
+    .from(quizAttempts)
+    .where(
+      and(
+        eq(quizAttempts.userId, opts.userId),
+        eq(quizAttempts.quizId, opts.quizId)
+      )
+    )
+    .get();
+  return row?.count ?? 0;
+}
+
 // ─── Entry point 1: submit an attempt (the dominant caller) ───
 // Scores answers, records the attempt + answers, and (if passed) marks the
 // lesson complete — all in one transaction.
@@ -152,6 +176,18 @@ export function submitQuizAttempt(opts: {
   const quiz = getQuizWithQuestions(opts.quizId);
   if (!quiz) {
     return { ok: false, error: "Quiz not found" };
+  }
+
+  // Enforce the retake cap before recording another attempt.
+  const priorAttempts = countQuizAttempts({
+    userId: opts.userId,
+    quizId: opts.quizId,
+  });
+  if (priorAttempts >= MAX_QUIZ_ATTEMPTS) {
+    return {
+      ok: false,
+      error: `No attempts remaining. You've used all ${MAX_QUIZ_ATTEMPTS} attempts for this quiz.`,
+    };
   }
 
   const { questionResults, totalCorrect, totalQuestions, score } = scoreAnswers(

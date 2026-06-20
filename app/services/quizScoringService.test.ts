@@ -19,6 +19,8 @@ import {
   calculateGrade,
   getQuizStats,
   getUserQuizHistory,
+  countQuizAttempts,
+  MAX_QUIZ_ATTEMPTS,
 } from "./quizScoringService";
 
 function seedLesson() {
@@ -85,6 +87,74 @@ describe("quizScoringService", () => {
       expect(calculateGrade(0.75)).toBe("C");
       expect(calculateGrade(0.65)).toBe("D");
       expect(calculateGrade(0.5)).toBe("F");
+    });
+  });
+
+  describe("attempt limit", () => {
+    it("counts a user's attempts for a quiz", () => {
+      const quiz = seedQuiz();
+      const q = seedMCQuestion(quiz.id, 1);
+
+      expect(countQuizAttempts({ userId: base.user.id, quizId: quiz.id })).toBe(
+        0
+      );
+
+      submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: { [q.question.id]: q.wrong.id },
+      });
+
+      expect(countQuizAttempts({ userId: base.user.id, quizId: quiz.id })).toBe(
+        1
+      );
+    });
+
+    it("allows up to MAX_QUIZ_ATTEMPTS, then rejects further submissions", () => {
+      const quiz = seedQuiz();
+      const q = seedMCQuestion(quiz.id, 1);
+
+      for (let i = 0; i < MAX_QUIZ_ATTEMPTS; i++) {
+        const outcome = submitQuizAttempt({
+          userId: base.user.id,
+          quizId: quiz.id,
+          selectedAnswers: { [q.question.id]: q.wrong.id },
+        });
+        expect(outcome.ok).toBe(true);
+      }
+
+      const blocked = submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: { [q.question.id]: q.wrong.id },
+      });
+
+      expect(blocked.ok).toBe(false);
+      if (!blocked.ok) {
+        expect(blocked.error).toMatch(/no attempts remaining/i);
+      }
+      // The rejected submission is not recorded.
+      expect(countQuizAttempts({ userId: base.user.id, quizId: quiz.id })).toBe(
+        MAX_QUIZ_ATTEMPTS
+      );
+    });
+
+    it("tracks attempts per user independently", () => {
+      const quiz = seedQuiz();
+      const q = seedMCQuestion(quiz.id, 1);
+
+      submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: { [q.question.id]: q.wrong.id },
+      });
+
+      expect(countQuizAttempts({ userId: base.user.id, quizId: quiz.id })).toBe(
+        1
+      );
+      expect(
+        countQuizAttempts({ userId: base.instructor.id, quizId: quiz.id })
+      ).toBe(0);
     });
   });
 

@@ -15,6 +15,7 @@
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx scripts/seed.ts",
     "master-seed": "tsx scripts/master-seed.ts",
+    "backfill-certificates": "tsx scripts/backfill-certificates.ts",
     "db:migrate": "drizzle-kit migrate",
     "loc": "git ls-files | grep -vE '(lock|.db|_snapshot.json)' | xargs wc -l",
     "prepare": "husky"

@@ -25,7 +25,11 @@ import {
   getQuizWithQuestions,
   getBestAttempt,
 } from "~/services/quizService";
-import { submitQuizAttempt } from "~/services/quizScoringService";
+import {
+  submitQuizAttempt,
+  countQuizAttempts,
+  MAX_QUIZ_ATTEMPTS,
+} from "~/services/quizScoringService";
 import { maybeCompleteCourse } from "~/services/certificateService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
@@ -262,6 +266,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }>;
   } | null = null;
   let bestAttempt: { score: number; passed: boolean } | null = null;
+  let quizAttemptsUsed = 0;
 
   if (quizRecord) {
     const quizData = getQuizWithQuestions(quizRecord.id);
@@ -292,6 +297,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       if (best) {
         bestAttempt = { score: best.score, passed: best.passed };
       }
+      quizAttemptsUsed = countQuizAttempts({
+        userId: currentUserId,
+        quizId: quizRecord.id,
+      });
     }
   }
 
@@ -322,6 +331,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     nextLesson,
     quiz,
     bestAttempt,
+    quizAttemptsUsed,
+    maxQuizAttempts: MAX_QUIZ_ATTEMPTS,
     lastWatchPosition,
     watchProgress,
     lessonProgressMap,
@@ -383,7 +394,9 @@ export async function action({ params, request }: Route.ActionArgs) {
       selectedAnswers,
     });
     if (!outcome.ok) {
-      throw data(outcome.error, { status: 400 });
+      // User-facing conditions (e.g. no attempts remaining) are returned so the
+      // quiz UI can show them inline rather than replacing the page.
+      return { quizError: outcome.error };
     }
 
     // Passing a quiz auto-completes the lesson, which may finish the course.
@@ -513,6 +526,8 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     nextLesson,
     quiz,
     bestAttempt,
+    quizAttemptsUsed,
+    maxQuizAttempts,
     lastWatchPosition,
     watchProgress,
     lessonProgressMap,
@@ -547,6 +562,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
   }, [justCompleted, nextLesson, course.slug, navigate]);
 
   const quizResult = quizFetcher.data?.quizResult ?? null;
+  const quizError = quizFetcher.data?.quizError ?? null;
   const isSubmittingQuiz = quizFetcher.state !== "idle";
 
   if (pppBlocked) {
@@ -687,6 +703,9 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
               quiz={quiz}
               bestAttempt={bestAttempt}
               quizResult={quizResult}
+              quizError={quizError}
+              attemptsUsed={quizAttemptsUsed}
+              maxAttempts={maxQuizAttempts}
               quizFetcher={quizFetcher}
               isSubmitting={isSubmittingQuiz}
             />
@@ -962,6 +981,9 @@ function QuizSection({
   quiz,
   bestAttempt,
   quizResult,
+  quizError,
+  attemptsUsed,
+  maxAttempts,
   quizFetcher,
   isSubmitting,
 }: {
@@ -993,9 +1015,13 @@ function QuizSection({
     }>;
     lessonCompleted: boolean;
   } | null;
+  quizError: string | null;
+  attemptsUsed: number;
+  maxAttempts: number;
   quizFetcher: ReturnType<typeof useFetcher>;
   isSubmitting: boolean;
 }) {
+  const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
   const [selectedAnswers, setSelectedAnswers] = useState<
     Record<number, number>
   >({});
@@ -1015,6 +1041,12 @@ function QuizSection({
       }
     }
   }, [quizResult, retaking]);
+
+  useEffect(() => {
+    if (quizError) {
+      toast.error(quizError);
+    }
+  }, [quizError]);
 
   const allAnswered = quiz.questions.every(
     (q) => selectedAnswers[q.id] !== undefined
@@ -1097,21 +1129,33 @@ function QuizSection({
             })}
           </div>
 
-          {/* Retake button */}
-          {!quizResult.passed && (
-            <div className="mt-6">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSelectedAnswers({});
-                  setRetaking(true);
-                }}
-              >
-                <RotateCcw className="mr-2 size-4" />
-                Retake Quiz
-              </Button>
-            </div>
-          )}
+          {/* Retake / exhausted */}
+          {!quizResult.passed &&
+            (attemptsRemaining > 0 ? (
+              <div className="mt-6">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedAnswers({});
+                    setRetaking(true);
+                  }}
+                >
+                  <RotateCcw className="mr-2 size-4" />
+                  Retake Exam
+                </Button>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {attemptsRemaining} of {maxAttempts} attempt
+                  {attemptsRemaining === 1 ? "" : "s"} remaining.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-6 rounded-lg bg-amber-50 p-4 dark:bg-amber-950">
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                  You've used all {maxAttempts} attempts for this exam, so it
+                  can no longer be retaken.
+                </p>
+              </div>
+            ))}
         </CardContent>
       </Card>
     );
@@ -1129,14 +1173,35 @@ function QuizSection({
                 — Best score: {Math.round(bestAttempt.score * 100)}%
               </span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowQuiz(true)}
-            >
-              <RotateCcw className="mr-2 size-4" />
-              Retake
-            </Button>
+            {attemptsRemaining > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowQuiz(true)}
+              >
+                <RotateCcw className="mr-2 size-4" />
+                Retake
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (attemptsRemaining <= 0) {
+    return (
+      <Card className="mb-8">
+        <CardContent className="p-6">
+          <div className="mb-4 flex items-center gap-2">
+            <HelpCircle className="size-5 text-primary" />
+            <h2 className="text-xl font-semibold">{quiz.title}</h2>
+          </div>
+          <div className="rounded-lg bg-amber-50 p-4 dark:bg-amber-950">
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+              You've used all {maxAttempts} attempts for this exam, so it can no
+              longer be retaken.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -1152,7 +1217,8 @@ function QuizSection({
         </div>
         <p className="mb-6 text-sm text-muted-foreground">
           Answer all questions and submit. Passing score:{" "}
-          {Math.round(quiz.passingScore * 100)}%.
+          {Math.round(quiz.passingScore * 100)}%. {attemptsRemaining} of{" "}
+          {maxAttempts} attempt{attemptsRemaining === 1 ? "" : "s"} remaining.
         </p>
 
         <quizFetcher.Form method="post" onSubmit={() => setRetaking(false)}>
