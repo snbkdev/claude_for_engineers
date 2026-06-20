@@ -1,12 +1,13 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "~/db";
 import { purchases } from "~/db/schema";
-import { getOrCreateTeamForUser } from "./teamService";
-import { generateCoupons } from "./couponService";
 
 // ─── Purchase Service ───
 // Handles purchase records (transaction log separate from enrollments).
 // Functions with multiple same-typed params take a single object param.
+// Purchase orchestration (individual + team, with enrollment / coupons /
+// notifications) lives in transactionService; this module owns the purchase
+// row primitives.
 
 export function createPurchase(opts: {
   userId: number;
@@ -24,6 +25,10 @@ export function createPurchase(opts: {
     })
     .returning()
     .get();
+}
+
+export function getPurchaseById(id: number) {
+  return db.select().from(purchases).where(eq(purchases.id, id)).get();
 }
 
 export function findPurchase(opts: { userId: number; courseId: number }) {
@@ -49,29 +54,4 @@ export function getPurchasesByCourse(courseId: number) {
     .from(purchases)
     .where(eq(purchases.courseId, courseId))
     .all();
-}
-
-// ─── Team Purchase ───
-
-export function createTeamPurchase(opts: {
-  userId: number;
-  courseId: number;
-  pricePaid: number;
-  country: string | null;
-  quantity: number;
-}) {
-  const purchase = createPurchase({
-    userId: opts.userId,
-    courseId: opts.courseId,
-    pricePaid: opts.pricePaid,
-    country: opts.country,
-  });
-  const team = getOrCreateTeamForUser(opts.userId);
-  const coupons = generateCoupons({
-    teamId: team.id,
-    courseId: opts.courseId,
-    purchaseId: purchase.id,
-    quantity: opts.quantity,
-  });
-  return { purchase, team, coupons };
 }

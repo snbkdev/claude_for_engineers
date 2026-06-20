@@ -4,8 +4,10 @@ import { toast } from "sonner";
 import * as v from "valibot";
 import type { Route } from "./+types/redeem.$code";
 import { getCourseById } from "~/services/courseService";
-import { getCouponByCode, redeemCoupon } from "~/services/couponService";
+import { getCouponByCode } from "~/services/couponService";
+import { redeem, couponCountryMatches } from "~/services/transactionService";
 import { isUserEnrolled } from "~/services/enrollmentService";
+import { getPurchaseById } from "~/services/purchaseService";
 import { getCurrentUserId } from "~/lib/session";
 import { resolveCountry } from "~/lib/country.server";
 import { parseParams, parseFormData } from "~/lib/validation";
@@ -13,9 +15,6 @@ import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Ticket, AlertCircle, CheckCircle2, Globe } from "lucide-react";
 import { data } from "react-router";
-import { db } from "~/db";
-import { purchases } from "~/db/schema";
-import { eq } from "drizzle-orm";
 
 const redeemParamsSchema = v.object({
   code: v.pipe(v.string(), v.minLength(1)),
@@ -63,14 +62,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let countryMismatch = false;
   if (!alreadyRedeemed && !alreadyEnrolled) {
     const userCountry = await resolveCountry(request);
-    const purchase = db
-      .select()
-      .from(purchases)
-      .where(eq(purchases.id, coupon.purchaseId))
-      .get();
-    if (purchase?.country && purchase.country !== (userCountry ?? "")) {
-      countryMismatch = true;
-    }
+    const purchase = getPurchaseById(coupon.purchaseId);
+    countryMismatch = !couponCountryMatches({
+      purchaseCountry: purchase?.country ?? null,
+      userCountry,
+    });
   }
 
   return {
@@ -97,18 +93,14 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("Invalid action.", { status: 400 });
   }
 
-  const userCountry = await resolveCountry(request);
-  const result = redeemCoupon({
-    code,
-    userId: currentUserId,
-    userCountry: userCountry ?? "",
-  });
+  const country = await resolveCountry(request);
+  const result = redeem({ code, userId: currentUserId, country });
 
   if (!result.ok) {
     return data({ error: result.error }, { status: 400 });
   }
 
-  const course = getCourseById(result.enrollment.courseId);
+  const course = getCourseById(result.data.enrollment.courseId);
   if (!course) {
     throw redirect("/courses");
   }

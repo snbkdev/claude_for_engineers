@@ -25,7 +25,7 @@ import {
   getQuizWithQuestions,
   getBestAttempt,
 } from "~/services/quizService";
-import { computeResult } from "~/services/quizScoringService";
+import { submitQuizAttempt } from "~/services/quizScoringService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -205,7 +205,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let pppPurchaseCountry: string | null = null;
 
   if (enrolled && currentUserId) {
-    const purchase = findPurchase({ userId: currentUserId, courseId: course.id });
+    const purchase = findPurchase({
+      userId: currentUserId,
+      courseId: course.id,
+    });
     const currentCountry = await resolveCountry(request);
     const pppResult = checkPppAccess(
       course.price,
@@ -223,7 +226,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const isInstructor =
     currentUserId != null && course.instructorId === currentUserId;
   const hasPurchased =
-    currentUserId != null && !!findPurchase({ userId: currentUserId, courseId: course.id });
+    currentUserId != null &&
+    !!findPurchase({ userId: currentUserId, courseId: course.id });
   const canComment = isInstructor || hasPurchased;
 
   const comments = canComment
@@ -370,21 +374,24 @@ export async function action({ params, request }: Route.ActionArgs) {
       }
     }
 
-    const result = computeResult({
+    const outcome = submitQuizAttempt({
       userId: currentUserId,
       quizId,
       selectedAnswers,
     });
-    if (!result) {
-      throw data("Failed to score quiz", { status: 500 });
+    if (!outcome.ok) {
+      throw data(outcome.error, { status: 400 });
     }
 
-    return { quizResult: result };
+    return { quizResult: outcome.result };
   }
 
   if (intent === "add-comment") {
     const isInstructor = course.instructorId === currentUserId;
-    const hasPurchased = !!findPurchase({ userId: currentUserId, courseId: course.id });
+    const hasPurchased = !!findPurchase({
+      userId: currentUserId,
+      courseId: course.id,
+    });
     if (!isInstructor && !hasPurchased) {
       throw data("You must own this course to comment", { status: 403 });
     }
@@ -436,7 +443,10 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (intent === "toggle-bookmark") {
     // You can only reach a lesson if you own the course (or teach it).
     const isInstructor = course.instructorId === currentUserId;
-    const enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
+    const enrolled = isUserEnrolled({
+      userId: currentUserId,
+      courseId: course.id,
+    });
     if (!isInstructor && !enrolled) {
       throw data("You must be enrolled to bookmark this lesson", {
         status: 403,
@@ -973,6 +983,7 @@ function QuizSection({
       selectedOptionId: number | null;
       correctOptionId: number | null;
     }>;
+    lessonCompleted: boolean;
   } | null;
   quizFetcher: ReturnType<typeof useFetcher>;
   isSubmitting: boolean;
@@ -1239,10 +1250,7 @@ function CommentsSection({
   }, [fetcher.data]);
 
   const isPosting = fetcher.state !== "idle";
-  const totalCount = comments.reduce(
-    (sum, c) => sum + 1 + c.replies.length,
-    0
-  );
+  const totalCount = comments.reduce((sum, c) => sum + 1 + c.replies.length, 0);
 
   return (
     <section className="mb-8 border-t pt-8">
@@ -1325,7 +1333,11 @@ function CommentItem({
               Reply
             </Button>
           ) : (
-            <replyFetcher.Form ref={replyFormRef} method="post" className="mt-2">
+            <replyFetcher.Form
+              ref={replyFormRef}
+              method="post"
+              className="mt-2"
+            >
               <input type="hidden" name="intent" value="add-comment" />
               <input type="hidden" name="parentId" value={comment.id} />
               <Textarea

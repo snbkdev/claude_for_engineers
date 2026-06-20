@@ -10,7 +10,6 @@ import {
 } from "~/services/courseService";
 import {
   isUserEnrolled,
-  enrollUser,
   getEnrollmentCountForCourse,
 } from "~/services/enrollmentService";
 import { getCurrentUserId } from "~/lib/session";
@@ -31,7 +30,7 @@ import { data } from "react-router";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice, getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
-import { createPurchase, createTeamPurchase } from "~/services/purchaseService";
+import { buyForSelf, buyForTeam } from "~/services/transactionService";
 import { parseFormData, parseParams } from "~/lib/validation";
 
 const purchaseParamsSchema = v.object({
@@ -42,7 +41,12 @@ const purchaseActionSchema = v.variant("intent", [
   v.object({ intent: v.literal("confirm-purchase") }),
   v.object({
     intent: v.literal("confirm-team-purchase"),
-    quantity: v.pipe(v.string(), v.transform(Number), v.integer(), v.minValue(1)),
+    quantity: v.pipe(
+      v.string(),
+      v.transform(Number),
+      v.integer(),
+      v.minValue(1)
+    ),
   }),
 ]);
 
@@ -73,10 +77,18 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     );
   }
 
+  // Instructors can't buy their own course.
+  if (course.instructorId === currentUserId) {
+    throw redirect(`/courses/${slug}`);
+  }
+
   const url = new URL(request.url);
   const mode = url.searchParams.get("mode");
 
-  const enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
+  const enrolled = isUserEnrolled({
+    userId: currentUserId,
+    courseId: course.id,
+  });
 
   if (enrolled && mode !== "team") {
     throw redirect(`/courses/${slug}?already_enrolled=1`);
@@ -139,39 +151,25 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const country = await resolveCountry(request);
-  const pppPrice = course.pppEnabled
-    ? calculatePppPrice(course.price, country)
-    : course.price;
 
   if (parsed.data.intent === "confirm-purchase") {
-    if (isUserEnrolled({ userId: currentUserId, courseId: course.id })) {
-      throw redirect(`/courses/${slug}`);
+    const result = buyForSelf({ userId: currentUserId, course, country });
+    if (!result.ok) {
+      return data({ error: result.error }, { status: 400 });
     }
-    createPurchase({
-      userId: currentUserId,
-      courseId: course.id,
-      pricePaid: pppPrice,
-      country,
-    });
-    enrollUser({
-      userId: currentUserId,
-      courseId: course.id,
-      sendEmail: false,
-      skipValidation: false,
-    });
     throw redirect(`/courses/${slug}/welcome`);
   }
 
   // Team purchase — user does NOT get enrolled themselves
-  const { quantity } = parsed.data;
-  const totalPrice = pppPrice * quantity;
-  createTeamPurchase({
+  const result = buyForTeam({
     userId: currentUserId,
-    courseId: course.id,
-    pricePaid: totalPrice,
+    course,
     country,
-    quantity,
+    quantity: parsed.data.quantity,
   });
+  if (!result.ok) {
+    return data({ error: result.error }, { status: 400 });
+  }
   throw redirect(`/team`);
 }
 

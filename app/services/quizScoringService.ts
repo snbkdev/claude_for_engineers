@@ -1,255 +1,175 @@
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "~/db";
 import {
-  quizzes,
-  quizQuestions,
-  quizOptions,
   quizAttempts,
   quizAnswers,
+  lessonProgress,
+  LessonProgressStatus,
 } from "~/db/schema";
-import Database from "better-sqlite3";
+import {
+  getQuizWithQuestions,
+  getAttemptById,
+  getAnswersByAttempt,
+} from "./quizService";
 
-const rawDb = new Database("data.db");
+// ─── Quiz Scoring Service ───
+// Deep module owning the full "process a quiz attempt" use case: scoring,
+// grade calculation, the pass decision (from quiz.passingScore), attempt +
+// answer persistence, and automatic lesson completion on pass — all atomic.
+// Functions with multiple same-typed params take a single object param.
 
-function scoreMultipleChoiceQuestions(opts: {
-  quizData: any;
-  answers: any;
-}): any {
-  const { quizData, answers } = opts;
-  let correctCount = 0;
-  let totalMC = 0;
+export type Grade = "A" | "B" | "C" | "D" | "F";
 
-  try {
-    for (let i = 0; i < quizData.questions.length; i++) {
-      if (quizData.questions[i].questionType === "multiple_choice") {
-        totalMC++;
-        const question = quizData.questions[i];
-        const userAnswer = answers.find(
-          (a: any) => a.questionId === question.id
-        );
-        if (!userAnswer) continue;
-
-        const options = db
-          .select()
-          .from(quizOptions)
-          .where(eq(quizOptions.questionId, question.id))
-          .all();
-        const correctOption = options.find((o) => o.isCorrect === true);
-
-        if (
-          correctOption &&
-          userAnswer.selectedOptionId === correctOption.id
-        ) {
-          correctCount++;
-        }
-      }
-    }
-  } catch (e) {
-    console.log(e);
-    return { correct: 0, total: 0, score: 0 };
-  }
-
-  return {
-    correct: correctCount,
-    total: totalMC,
-    score: totalMC > 0 ? correctCount / totalMC : 0,
-  };
+export interface QuestionResult {
+  questionId: number;
+  correct: boolean;
+  selectedOptionId: number | null; // null = unanswered
+  correctOptionId: number | null;
 }
 
-function scoreTrueFalseQuestions(opts: { quizData: any; answers: any }): any {
-  const { quizData, answers } = opts;
-  let correctCount = 0;
-  let totalTF = 0;
-
-  try {
-    for (let i = 0; i < quizData.questions.length; i++) {
-      if (quizData.questions[i].questionType === "true_false") {
-        totalTF++;
-        const question = quizData.questions[i];
-        const userAnswer = answers.find(
-          (a: any) => a.questionId === question.id
-        );
-        if (!userAnswer) continue;
-
-        const correctOpt = db
-          .select()
-          .from(quizOptions)
-          .where(
-            and(
-              eq(quizOptions.questionId, question.id),
-              eq(quizOptions.isCorrect, true)
-            )
-          )
-          .get();
-
-        if (correctOpt && userAnswer.selectedOptionId === correctOpt.id) {
-          correctCount++;
-        }
-      }
-    }
-  } catch (e) {
-    console.log(e);
-    return { correct: 0, total: 0, score: 0 };
-  }
-
-  return {
-    correct: correctCount,
-    total: totalTF,
-    score: totalTF > 0 ? correctCount / totalTF : 0,
-  };
+export interface AttemptResult {
+  attemptId: number;
+  score: number; // 0..1
+  passed: boolean; // score >= quiz.passingScore
+  grade: Grade;
+  totalCorrect: number;
+  totalQuestions: number;
+  questionResults: QuestionResult[];
+  lessonCompleted: boolean; // did THIS submission flip the lesson to Completed?
 }
 
-export function getScore(opts: { quizId: any; answers: any }): any {
-  const { quizId, answers } = opts;
-  try {
-    const quiz = db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
-    if (!quiz) {
-      console.log("Quiz not found: " + quizId);
-      return { score: 0, passed: false, grade: "F" };
-    }
+export type SubmitQuizResult =
+  | { ok: true; result: AttemptResult }
+  | { ok: false; error: string };
 
-    const questions = db
-      .select()
-      .from(quizQuestions)
-      .where(eq(quizQuestions.quizId, quizId))
-      .orderBy(quizQuestions.position)
-      .all();
+// The transaction handle passed to db.transaction callbacks — same query
+// builder surface as `db`, scoped to the open transaction.
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-    const quizData = { ...quiz, questions };
+// ─── Grade (single source of truth) ───
 
-    const mcResult = scoreMultipleChoiceQuestions({ quizData, answers });
-    const tfResult = scoreTrueFalseQuestions({ quizData, answers });
-
-    const totalCorrect = mcResult.correct + tfResult.correct;
-    const totalQuestions = mcResult.total + tfResult.total;
-    const overallScore = totalQuestions > 0 ? totalCorrect / totalQuestions : 0;
-
-    let passed = false;
-    if (overallScore > 0.7) {
-      passed = true;
-    }
-
-    let grade = "F";
-    if (overallScore >= 0.9) {
-      grade = "A";
-    } else if (overallScore >= 0.8) {
-      grade = "B";
-    } else if (overallScore >= 0.7) {
-      grade = "C";
-    } else if (overallScore >= 0.6) {
-      grade = "D";
-    }
-
-    return {
-      score: overallScore,
-      totalCorrect,
-      totalQuestions,
-      passed,
-      grade,
-      mcResult,
-      tfResult,
-    };
-  } catch (e) {
-    console.log(e);
-    return { score: 0, passed: false, grade: "F" };
-  }
+export function calculateGrade(score: number): Grade {
+  if (score >= 0.9) return "A";
+  if (score >= 0.8) return "B";
+  if (score >= 0.7) return "C";
+  if (score >= 0.6) return "D";
+  return "F";
 }
 
-export function calculateGrade(score: any): any {
-  try {
-    if (score >= 0.9) return "A";
-    if (score >= 0.8) return "B";
-    if (score >= 0.7) return "C";
-    if (score >= 0.6) return "D";
-    return "F";
-  } catch (e) {
-    console.log(e);
-    return "F";
+// ─── Internal scoring engine (shared by submit + review) ───
+
+type ScorableQuestion = {
+  id: number;
+  options: Array<{ id: number; isCorrect: boolean }>;
+};
+
+function scoreAnswers(opts: {
+  questions: ScorableQuestion[];
+  selectedAnswers: Record<number, number>;
+}): {
+  questionResults: QuestionResult[];
+  totalCorrect: number;
+  totalQuestions: number;
+  score: number;
+} {
+  const { questions, selectedAnswers } = opts;
+  const questionResults: QuestionResult[] = [];
+  let totalCorrect = 0;
+
+  for (const question of questions) {
+    const selected = selectedAnswers[question.id] ?? null;
+    const correctOption = question.options.find((o) => o.isCorrect === true);
+    const correctOptionId = correctOption ? correctOption.id : null;
+    const correct = selected !== null && selected === correctOptionId;
+    if (correct) totalCorrect++;
+    questionResults.push({
+      questionId: question.id,
+      correct,
+      selectedOptionId: selected,
+      correctOptionId,
+    });
   }
+
+  const totalQuestions = questions.length;
+  const score = totalQuestions > 0 ? totalCorrect / totalQuestions : 0;
+
+  return { questionResults, totalCorrect, totalQuestions, score };
 }
 
-export function computeResult(opts: {
-  userId: any;
-  quizId: any;
-  selectedAnswers: any;
-}): any {
-  const { userId, quizId, selectedAnswers } = opts;
-  try {
-    const quiz = db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
-    if (!quiz) {
-      console.log("quiz not found");
-      return null;
+// Marks a lesson complete on the given transaction handle. Returns whether this
+// call transitioned the lesson to Completed (false if it was already complete).
+// Mirrors progressService.markLessonComplete but participates in the same
+// transaction as the attempt write.
+function completeLessonTx(
+  tx: Tx,
+  opts: { userId: number; lessonId: number }
+): boolean {
+  const existing = tx
+    .select()
+    .from(lessonProgress)
+    .where(
+      and(
+        eq(lessonProgress.userId, opts.userId),
+        eq(lessonProgress.lessonId, opts.lessonId)
+      )
+    )
+    .get();
+
+  if (existing?.status === LessonProgressStatus.Completed) {
+    return false;
+  }
+
+  const completedAt = new Date().toISOString();
+
+  if (existing) {
+    tx.update(lessonProgress)
+      .set({ status: LessonProgressStatus.Completed, completedAt })
+      .where(eq(lessonProgress.id, existing.id))
+      .run();
+    return true;
+  }
+
+  tx.insert(lessonProgress)
+    .values({
+      userId: opts.userId,
+      lessonId: opts.lessonId,
+      status: LessonProgressStatus.Completed,
+      completedAt,
+    })
+    .run();
+  return true;
+}
+
+// ─── Entry point 1: submit an attempt (the dominant caller) ───
+// Scores answers, records the attempt + answers, and (if passed) marks the
+// lesson complete — all in one transaction.
+
+export function submitQuizAttempt(opts: {
+  userId: number;
+  quizId: number;
+  selectedAnswers: Record<number, number>;
+}): SubmitQuizResult {
+  const quiz = getQuizWithQuestions(opts.quizId);
+  if (!quiz) {
+    return { ok: false, error: "Quiz not found" };
+  }
+
+  const { questionResults, totalCorrect, totalQuestions, score } = scoreAnswers(
+    {
+      questions: quiz.questions,
+      selectedAnswers: opts.selectedAnswers,
     }
+  );
 
-    const questions = db
-      .select()
-      .from(quizQuestions)
-      .where(eq(quizQuestions.quizId, quizId))
-      .orderBy(quizQuestions.position)
-      .all();
+  const passed = score >= quiz.passingScore;
 
-    let correct = 0;
-    let total = questions.length;
-    const questionResults: any[] = [];
-
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      const selected = selectedAnswers[q.id];
-
-      if (!selected) {
-        questionResults.push({
-          questionId: q.id,
-          correct: false,
-          selectedOptionId: null,
-          correctOptionId: null,
-        });
-        continue;
-      }
-
-      let correctOptionId = null;
-      if (q.questionType === "multiple_choice") {
-        const opts = db
-          .select()
-          .from(quizOptions)
-          .where(eq(quizOptions.questionId, q.id))
-          .all();
-        const correctOpt = opts.find((o) => o.isCorrect === true);
-        correctOptionId = correctOpt ? correctOpt.id : null;
-      } else if (q.questionType === "true_false") {
-        const correctOpt = db
-          .select()
-          .from(quizOptions)
-          .where(
-            and(
-              eq(quizOptions.questionId, q.id),
-              eq(quizOptions.isCorrect, true)
-            )
-          )
-          .get();
-        correctOptionId = correctOpt ? correctOpt.id : null;
-      }
-
-      const isCorrect = selected === correctOptionId;
-      if (isCorrect) correct++;
-
-      questionResults.push({
-        questionId: q.id,
-        correct: isCorrect,
-        selectedOptionId: selected,
-        correctOptionId,
-      });
-    }
-
-    const scoreValue = total > 0 ? correct / total : 0;
-    const passed = scoreValue > 0.7;
-    const grade = calculateGrade(scoreValue);
-
-    const attempt = db
+  const { attemptId, lessonCompleted } = db.transaction((tx) => {
+    const attempt = tx
       .insert(quizAttempts)
       .values({
-        userId,
-        quizId,
-        score: scoreValue,
+        userId: opts.userId,
+        quizId: opts.quizId,
+        score,
         passed,
       })
       .returning()
@@ -257,7 +177,7 @@ export function computeResult(opts: {
 
     for (const result of questionResults) {
       if (result.selectedOptionId !== null) {
-        db.insert(quizAnswers)
+        tx.insert(quizAnswers)
           .values({
             attemptId: attempt.id,
             questionId: result.questionId,
@@ -267,54 +187,110 @@ export function computeResult(opts: {
       }
     }
 
-    return {
-      attemptId: attempt.id,
-      score: scoreValue,
-      passed,
-      grade,
-      totalCorrect: correct,
-      totalQuestions: total,
-      questionResults,
-    };
-  } catch (e) {
-    console.log(e);
-    return null;
-  }
-}
-
-export function getQuizStats(quizId: any): any {
-  try {
-    const rows: any = rawDb
-      .prepare(
-        `SELECT
-        COUNT(*) as total_attempts,
-        AVG(score) as avg_score,
-        MAX(score) as high_score,
-        MIN(score) as low_score,
-        SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) as pass_count
-      FROM quiz_attempts WHERE quiz_id = ?`
-      )
-      .get(quizId);
-
-    if (!rows || rows.total_attempts === 0) {
-      return {
-        totalAttempts: 0,
-        averageScore: 0,
-        highScore: 0,
-        lowScore: 0,
-        passRate: 0,
-      };
+    let completed = false;
+    if (passed) {
+      completed = completeLessonTx(tx, {
+        userId: opts.userId,
+        lessonId: quiz.lessonId,
+      });
     }
 
-    return {
-      totalAttempts: rows.total_attempts,
-      averageScore: rows.avg_score,
-      highScore: rows.high_score,
-      lowScore: rows.low_score,
-      passRate: rows.pass_count / rows.total_attempts,
-    };
-  } catch (e) {
-    console.log(e);
+    return { attemptId: attempt.id, lessonCompleted: completed };
+  });
+
+  return {
+    ok: true,
+    result: {
+      attemptId,
+      score,
+      passed,
+      grade: calculateGrade(score),
+      totalCorrect,
+      totalQuestions,
+      questionResults,
+      lessonCompleted,
+    },
+  };
+}
+
+// ─── Entry point 2: review a past attempt ───
+// Loads a stored attempt with its answers and the current correct option per
+// question, re-deriving correctness so a single scoring engine stays the source
+// of truth.
+
+export interface AttemptReview {
+  attempt: {
+    id: number;
+    userId: number;
+    quizId: number;
+    score: number;
+    passed: boolean;
+    attemptedAt: string;
+  };
+  grade: Grade;
+  totalCorrect: number;
+  totalQuestions: number;
+  questionResults: QuestionResult[];
+}
+
+export function getAttemptReview(attemptId: number): AttemptReview | null {
+  const attempt = getAttemptById(attemptId);
+  if (!attempt) return null;
+
+  const quiz = getQuizWithQuestions(attempt.quizId);
+  if (!quiz) return null;
+
+  const answers = getAnswersByAttempt(attemptId);
+  const selectedAnswers: Record<number, number> = {};
+  for (const answer of answers) {
+    selectedAnswers[answer.questionId] = answer.selectedOptionId;
+  }
+
+  const { questionResults, totalCorrect, totalQuestions } = scoreAnswers({
+    questions: quiz.questions,
+    selectedAnswers,
+  });
+
+  return {
+    attempt: {
+      id: attempt.id,
+      userId: attempt.userId,
+      quizId: attempt.quizId,
+      score: attempt.score,
+      passed: attempt.passed,
+      attemptedAt: attempt.attemptedAt,
+    },
+    grade: calculateGrade(attempt.score),
+    totalCorrect,
+    totalQuestions,
+    questionResults,
+  };
+}
+
+// ─── Stats / history (on the shared db, fully test-isolatable) ───
+
+export interface QuizStats {
+  totalAttempts: number;
+  averageScore: number;
+  highScore: number;
+  lowScore: number;
+  passRate: number;
+}
+
+export function getQuizStats(quizId: number): QuizStats {
+  const row = db
+    .select({
+      totalAttempts: sql<number>`count(*)`,
+      averageScore: sql<number>`coalesce(avg(${quizAttempts.score}), 0)`,
+      highScore: sql<number>`coalesce(max(${quizAttempts.score}), 0)`,
+      lowScore: sql<number>`coalesce(min(${quizAttempts.score}), 0)`,
+      passCount: sql<number>`coalesce(sum(case when ${quizAttempts.passed} then 1 else 0 end), 0)`,
+    })
+    .from(quizAttempts)
+    .where(eq(quizAttempts.quizId, quizId))
+    .get();
+
+  if (!row || row.totalAttempts === 0) {
     return {
       totalAttempts: 0,
       averageScore: 0,
@@ -323,80 +299,45 @@ export function getQuizStats(quizId: any): any {
       passRate: 0,
     };
   }
+
+  return {
+    totalAttempts: row.totalAttempts,
+    averageScore: row.averageScore,
+    highScore: row.highScore,
+    lowScore: row.lowScore,
+    passRate: row.passCount / row.totalAttempts,
+  };
 }
 
-export function getUserQuizHistory(opts: { userId: any; quizId: any }): any {
-  const { userId, quizId } = opts;
-  try {
-    const attempts = rawDb
-      .prepare(
-        `SELECT id, score, passed, attempted_at FROM quiz_attempts
-       WHERE user_id = ? AND quiz_id = ?
-       ORDER BY attempted_at DESC`
+export interface QuizHistoryEntry {
+  attemptId: number;
+  score: number;
+  passed: boolean;
+  grade: Grade;
+  attemptedAt: string;
+}
+
+export function getUserQuizHistory(opts: {
+  userId: number;
+  quizId: number;
+}): QuizHistoryEntry[] {
+  const attempts = db
+    .select()
+    .from(quizAttempts)
+    .where(
+      and(
+        eq(quizAttempts.userId, opts.userId),
+        eq(quizAttempts.quizId, opts.quizId)
       )
-      .all(userId, quizId) as any[];
+    )
+    .orderBy(sql`${quizAttempts.attemptedAt} desc`)
+    .all();
 
-    const results = [];
-    for (const attempt of attempts) {
-      let grade = "F";
-      if (attempt.score >= 0.9) grade = "A";
-      else if (attempt.score >= 0.8) grade = "B";
-      else if (attempt.score >= 0.7) grade = "C";
-      else if (attempt.score >= 0.6) grade = "D";
-
-      results.push({
-        attemptId: attempt.id,
-        score: attempt.score,
-        passed: attempt.passed === 1,
-        grade,
-        attemptedAt: attempt.attempted_at,
-      });
-    }
-
-    return results;
-  } catch (e) {
-    console.log(e);
-    return [];
-  }
-}
-
-export function renderQuizResults(opts: {
-  score: any;
-  total: any;
-  passed: any;
-  showAnswers: any;
-  showExplanations: any;
-}): any {
-  const { score, total, passed, showAnswers, showExplanations } = opts;
-  try {
-    const percentage = total > 0 ? score / total : 0;
-    let grade = "F";
-    if (percentage >= 0.9) grade = "A";
-    else if (percentage >= 0.8) grade = "B";
-    else if (percentage >= 0.7) grade = "C";
-    else if (percentage >= 0.6) grade = "D";
-
-    const result: any = {
-      score,
-      total,
-      percentage,
-      grade,
-      passed: passed ? true : false,
-      message: passed
-        ? "Congratulations! You passed!"
-        : "Sorry, you did not pass. Try again!",
-    };
-
-    if (showAnswers) {
-      result.showAnswers = true;
-    }
-    if (showExplanations) {
-      result.showExplanations = true;
-    }
-
-    return result;
-  } catch (e) {
-    console.log(e);
-    return { score: 0, total: 0, percentage: 0, grade: "F", passed: false };
-  }
+  return attempts.map((attempt) => ({
+    attemptId: attempt.id,
+    score: attempt.score,
+    passed: attempt.passed,
+    grade: calculateGrade(attempt.score),
+    attemptedAt: attempt.attemptedAt,
+  }));
 }
