@@ -20,6 +20,7 @@ import {
   Sun,
   LogOut,
   Settings,
+  NotebookPen,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -65,6 +66,12 @@ const navItems: NavItem[] = [
     label: "Dashboard",
     to: "/dashboard",
     icon: <LayoutDashboard className="size-4" />,
+    roles: [UserRole.Student],
+  },
+  {
+    label: "My Notes",
+    to: "/notes",
+    icon: <NotebookPen className="size-4" />,
     roles: [UserRole.Student],
   },
   {

@@ -51,6 +51,9 @@ import {
   XCircle,
   Trophy,
   RotateCcw,
+  StickyNote,
+  Pencil,
+  Plus,
 } from "lucide-react";
 import { cn, formatDuration } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
@@ -76,6 +79,13 @@ import {
   toggleBookmark,
   getBookmarkedLessonIds,
 } from "~/services/bookmarkService";
+import {
+  getNotesForLesson,
+  getNoteById,
+  createNote,
+  updateNote,
+  deleteNote,
+} from "~/services/noteService";
 
 const lessonParamsSchema = v.object({
   slug: v.pipe(v.string(), v.minLength(1)),
@@ -239,6 +249,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ? buildCommentTree(getCommentsForLesson(lessonId))
     : [];
 
+  // Private notes — visible to whoever can access the lesson (owner or teacher).
+  const notes =
+    currentUserId && (enrolled || isInstructor)
+      ? getNotesForLesson({ userId: currentUserId, lessonId })
+      : [];
+
   // Render lesson content from Markdown to HTML server-side
   const contentHtml = lesson.content
     ? await renderMarkdown(lesson.content)
@@ -344,6 +360,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     isInstructor,
     isBookmarked,
     bookmarkedLessonIds,
+    notes,
   };
 }
 
@@ -481,6 +498,53 @@ export async function action({ params, request }: Route.ActionArgs) {
     return { bookmarked };
   }
 
+  if (intent === "add-note") {
+    const isInstructor = course.instructorId === currentUserId;
+    const enrolled = isUserEnrolled({
+      userId: currentUserId,
+      courseId: course.id,
+    });
+    if (!isInstructor && !enrolled) {
+      throw data("You must own this course to take notes", { status: 403 });
+    }
+
+    const content = String(formData.get("content") ?? "");
+    if (!content.trim()) {
+      return { noteError: "Note cannot be empty" };
+    }
+
+    createNote({ userId: currentUserId, lessonId, content });
+    return { noteSuccess: true };
+  }
+
+  if (intent === "update-note" || intent === "delete-note") {
+    const noteId = Number(formData.get("noteId"));
+    if (isNaN(noteId)) {
+      throw data("Invalid note", { status: 400 });
+    }
+
+    const note = getNoteById(noteId);
+    if (!note || note.lessonId !== lessonId) {
+      throw data("Note not found", { status: 404 });
+    }
+    // Notes are private — only the author may edit or remove them.
+    if (note.userId !== currentUserId) {
+      throw data("You cannot modify this note", { status: 403 });
+    }
+
+    if (intent === "delete-note") {
+      deleteNote(noteId);
+      return { noteSuccess: true };
+    }
+
+    const content = String(formData.get("content") ?? "");
+    if (!content.trim()) {
+      return { noteError: "Note cannot be empty" };
+    }
+    updateNote({ id: noteId, content });
+    return { noteSuccess: true };
+  }
+
   throw data("Invalid action", { status: 400 });
 }
 
@@ -539,6 +603,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     isInstructor,
     isBookmarked,
     bookmarkedLessonIds,
+    notes,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
@@ -564,6 +629,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
   const quizResult = quizFetcher.data?.quizResult ?? null;
   const quizError = quizFetcher.data?.quizError ?? null;
   const isSubmittingQuiz = quizFetcher.state !== "idle";
+  const notesFetcher = useFetcher({ key: `notes-${lesson.id}` });
 
   if (pppBlocked) {
     const purchaseCountryName = pppPurchaseCountry
@@ -639,180 +705,192 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
           <span className="text-foreground">{lesson.title}</span>
         </nav>
 
-        <div className="mx-auto max-w-4xl">
-          {/* Lesson Title */}
-          <h1 className="mb-2 text-3xl font-bold">{lesson.title}</h1>
-          <div className="mb-6 flex items-center gap-3">
-            {lesson.durationMinutes && (
-              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                <Clock className="size-4" />
-                {formatDuration(lesson.durationMinutes, true, false, false)}
-              </div>
-            )}
-            {lesson.githubRepoUrl && (
-              <a
-                href={lesson.githubRepoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Button variant="outline" size="sm">
-                  <Github className="mr-1.5 size-4" />
-                  Open Code
-                </Button>
-              </a>
-            )}
-            {enrolled && currentUserId && (
-              <LessonBookmarkButton isBookmarked={isBookmarked} />
-            )}
-          </div>
-
-          {/* YouTube Video */}
-          {lesson.videoUrl && (
-            <YouTubePlayer
-              videoUrl={lesson.videoUrl}
-              lessonId={lesson.id}
-              title={lesson.title}
-              startPosition={lastWatchPosition}
-              durationMinutes={lesson.durationMinutes}
-              watchProgress={watchProgress}
-              trackingEnabled={enrolled && !!currentUserId}
-              autoplay={autoplay}
-              onToggleAutoplay={toggleAutoplay}
-            />
-          )}
-
-          {/* Lesson Content */}
-          {contentHtml && (
-            <div
-              className="prose prose-neutral dark:prose-invert mb-8 max-w-none"
-              dangerouslySetInnerHTML={{ __html: contentHtml }}
-            />
-          )}
-
-          {!contentHtml && !lesson.videoUrl && (
-            <Card className="mb-8">
-              <CardContent className="py-12 text-center text-muted-foreground">
-                No content has been added to this lesson yet.
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Quiz Section */}
-          {quiz && enrolled && currentUserId && (
-            <QuizSection
-              quiz={quiz}
-              bestAttempt={bestAttempt}
-              quizResult={quizResult}
-              quizError={quizError}
-              attemptsUsed={quizAttemptsUsed}
-              maxAttempts={maxQuizAttempts}
-              quizFetcher={quizFetcher}
-              isSubmitting={isSubmittingQuiz}
-            />
-          )}
-
-          {/* Mark Complete / Up Next */}
-          {enrolled && currentUserId && (
-            <div className="mb-8">
-              {isCompleted ? (
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 text-green-600">
-                    <CheckCircle2 className="size-5" />
-                    <span className="font-medium">Lesson completed</span>
-                  </div>
-                  {nextLesson && (
-                    <Link
-                      to={`/courses/${course.slug}/lessons/${nextLesson.id}`}
-                    >
-                      <Button variant="outline" size="sm">
-                        Up next: {nextLesson.title}
-                        <ChevronRight className="ml-1 size-4" />
-                      </Button>
-                    </Link>
-                  )}
+        <div className="flex flex-col gap-8 xl:flex-row">
+          <div className="mx-auto w-full max-w-4xl xl:mx-0 xl:min-w-0 xl:flex-1">
+            {/* Lesson Title */}
+            <h1 className="mb-2 text-3xl font-bold">{lesson.title}</h1>
+            <div className="mb-6 flex items-center gap-3">
+              {lesson.durationMinutes && (
+                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <Clock className="size-4" />
+                  {formatDuration(lesson.durationMinutes, true, false, false)}
                 </div>
-              ) : nextLesson ? (
-                <fetcher.Form method="post">
-                  <input type="hidden" name="intent" value="mark-complete" />
-                  <Button disabled={isMarking}>
-                    {isMarking ? (
-                      "Completing..."
-                    ) : (
-                      <>
-                        Up next: {nextLesson.title}
-                        <ChevronRight className="ml-1 size-4" />
-                      </>
-                    )}
+              )}
+              {lesson.githubRepoUrl && (
+                <a
+                  href={lesson.githubRepoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Button variant="outline" size="sm">
+                    <Github className="mr-1.5 size-4" />
+                    Open Code
                   </Button>
-                </fetcher.Form>
-              ) : (
-                <fetcher.Form method="post">
-                  <input type="hidden" name="intent" value="mark-complete" />
-                  <Button disabled={isMarking}>
-                    <CheckCircle2 className="mr-2 size-4" />
-                    {isMarking ? "Marking..." : "Mark as Complete"}
-                  </Button>
-                </fetcher.Form>
+                </a>
+              )}
+              {enrolled && currentUserId && (
+                <LessonBookmarkButton isBookmarked={isBookmarked} />
               )}
             </div>
-          )}
 
-          {/* Lesson Discussion */}
-          {canComment && (
-            <CommentsSection
-              comments={comments}
-              isInstructor={isInstructor}
-              currentUserId={currentUserId}
-            />
-          )}
-
-          {/* Prev/Next Navigation */}
-          <div className="flex items-center justify-between border-t pt-6">
-            {prevLesson ? (
-              <Link
-                to={`/courses/${course.slug}/lessons/${prevLesson.id}`}
-                className="flex items-center gap-2 text-sm hover:text-foreground text-muted-foreground"
-              >
-                <ChevronLeft className="size-4" />
-                <div>
-                  <div className="text-xs text-muted-foreground">Previous</div>
-                  <div className="font-medium text-foreground">
-                    {prevLesson.title}
-                  </div>
-                </div>
-              </Link>
-            ) : (
-              <div />
+            {/* YouTube Video */}
+            {lesson.videoUrl && (
+              <YouTubePlayer
+                videoUrl={lesson.videoUrl}
+                lessonId={lesson.id}
+                title={lesson.title}
+                startPosition={lastWatchPosition}
+                durationMinutes={lesson.durationMinutes}
+                watchProgress={watchProgress}
+                trackingEnabled={enrolled && !!currentUserId}
+                autoplay={autoplay}
+                onToggleAutoplay={toggleAutoplay}
+              />
             )}
 
-            {nextLesson ? (
-              <Link
-                to={`/courses/${course.slug}/lessons/${nextLesson.id}`}
-                className="flex items-center gap-2 text-right text-sm hover:text-foreground text-muted-foreground"
-              >
-                <div>
-                  <div className="text-xs text-muted-foreground">Next</div>
-                  <div className="font-medium text-foreground">
-                    {nextLesson.title}
-                  </div>
-                </div>
-                <ChevronRight className="size-4" />
-              </Link>
-            ) : (
-              <Link
-                to={`/courses/${course.slug}`}
-                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-              >
-                <div>
-                  <div className="text-xs text-muted-foreground">Back to</div>
-                  <div className="font-medium text-foreground">
-                    {course.title}
-                  </div>
-                </div>
-                <ChevronRight className="size-4" />
-              </Link>
+            {/* Lesson Content */}
+            {contentHtml && (
+              <div
+                className="prose prose-neutral dark:prose-invert mb-8 max-w-none"
+                dangerouslySetInnerHTML={{ __html: contentHtml }}
+              />
             )}
+
+            {!contentHtml && !lesson.videoUrl && (
+              <Card className="mb-8">
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  No content has been added to this lesson yet.
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Quiz Section */}
+            {quiz && enrolled && currentUserId && (
+              <QuizSection
+                quiz={quiz}
+                bestAttempt={bestAttempt}
+                quizResult={quizResult}
+                quizError={quizError}
+                attemptsUsed={quizAttemptsUsed}
+                maxAttempts={maxQuizAttempts}
+                quizFetcher={quizFetcher}
+                isSubmitting={isSubmittingQuiz}
+              />
+            )}
+
+            {/* Mark Complete / Up Next */}
+            {enrolled && currentUserId && (
+              <div className="mb-8">
+                {isCompleted ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle2 className="size-5" />
+                      <span className="font-medium">Lesson completed</span>
+                    </div>
+                    {nextLesson && (
+                      <Link
+                        to={`/courses/${course.slug}/lessons/${nextLesson.id}`}
+                      >
+                        <Button variant="outline" size="sm">
+                          Up next: {nextLesson.title}
+                          <ChevronRight className="ml-1 size-4" />
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
+                ) : nextLesson ? (
+                  <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="mark-complete" />
+                    <Button disabled={isMarking}>
+                      {isMarking ? (
+                        "Completing..."
+                      ) : (
+                        <>
+                          Up next: {nextLesson.title}
+                          <ChevronRight className="ml-1 size-4" />
+                        </>
+                      )}
+                    </Button>
+                  </fetcher.Form>
+                ) : (
+                  <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="mark-complete" />
+                    <Button disabled={isMarking}>
+                      <CheckCircle2 className="mr-2 size-4" />
+                      {isMarking ? "Marking..." : "Mark as Complete"}
+                    </Button>
+                  </fetcher.Form>
+                )}
+              </div>
+            )}
+
+            {/* Lesson Discussion */}
+            {canComment && (
+              <CommentsSection
+                comments={comments}
+                isInstructor={isInstructor}
+                currentUserId={currentUserId}
+              />
+            )}
+
+            {/* Prev/Next Navigation */}
+            <div className="flex items-center justify-between border-t pt-6">
+              {prevLesson ? (
+                <Link
+                  to={`/courses/${course.slug}/lessons/${prevLesson.id}`}
+                  className="flex items-center gap-2 text-sm hover:text-foreground text-muted-foreground"
+                >
+                  <ChevronLeft className="size-4" />
+                  <div>
+                    <div className="text-xs text-muted-foreground">
+                      Previous
+                    </div>
+                    <div className="font-medium text-foreground">
+                      {prevLesson.title}
+                    </div>
+                  </div>
+                </Link>
+              ) : (
+                <div />
+              )}
+
+              {nextLesson ? (
+                <Link
+                  to={`/courses/${course.slug}/lessons/${nextLesson.id}`}
+                  className="flex items-center gap-2 text-right text-sm hover:text-foreground text-muted-foreground"
+                >
+                  <div>
+                    <div className="text-xs text-muted-foreground">Next</div>
+                    <div className="font-medium text-foreground">
+                      {nextLesson.title}
+                    </div>
+                  </div>
+                  <ChevronRight className="size-4" />
+                </Link>
+              ) : (
+                <Link
+                  to={`/courses/${course.slug}`}
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <div>
+                    <div className="text-xs text-muted-foreground">Back to</div>
+                    <div className="font-medium text-foreground">
+                      {course.title}
+                    </div>
+                  </div>
+                  <ChevronRight className="size-4" />
+                </Link>
+              )}
+            </div>
           </div>
+
+          {currentUserId && (enrolled || isInstructor) && (
+            <aside className="w-full xl:w-80 xl:shrink-0">
+              <div className="xl:sticky xl:top-6">
+                <NotesPanel notes={notes} notesFetcher={notesFetcher} />
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     </div>
@@ -1282,6 +1360,158 @@ function formatCommentDate(iso: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+type NoteData = {
+  id: number;
+  lessonId: number;
+  userId: number;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function NotesPanel({
+  notes,
+  notesFetcher,
+}: {
+  notes: NoteData[];
+  notesFetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [newNote, setNewNote] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+
+  useEffect(() => {
+    const data = notesFetcher.data as
+      | { noteSuccess?: boolean; noteError?: string }
+      | undefined;
+    if (!data) return;
+    if (data.noteError) {
+      toast.error(data.noteError);
+    } else if (data.noteSuccess) {
+      setNewNote("");
+      setEditingId(null);
+    }
+  }, [notesFetcher.data]);
+
+  const isBusy = notesFetcher.state !== "idle";
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <StickyNote className="size-5 text-primary" />
+          <h2 className="font-semibold">My Notes</h2>
+        </div>
+
+        {/* New note */}
+        <notesFetcher.Form method="post">
+          <input type="hidden" name="intent" value="add-note" />
+          <Textarea
+            name="content"
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            placeholder="Write a note for this lesson…"
+            rows={3}
+            className="resize-none text-sm"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            className="mt-2 w-full"
+            disabled={isBusy || !newNote.trim()}
+          >
+            <Plus className="mr-1.5 size-4" />
+            Add note
+          </Button>
+        </notesFetcher.Form>
+
+        {/* Existing notes */}
+        <div className="mt-4 space-y-3">
+          {notes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No notes yet. Jot down key takeaways as you learn.
+            </p>
+          ) : (
+            notes.map((note) =>
+              editingId === note.id ? (
+                <notesFetcher.Form
+                  method="post"
+                  key={note.id}
+                  className="rounded-lg border p-3"
+                >
+                  <input type="hidden" name="intent" value="update-note" />
+                  <input type="hidden" name="noteId" value={note.id} />
+                  <Textarea
+                    name="content"
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    rows={3}
+                    className="resize-none text-sm"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={isBusy || !editText.trim()}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditingId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </notesFetcher.Form>
+              ) : (
+                <div key={note.id} className="rounded-lg border p-3">
+                  <p className="whitespace-pre-wrap text-sm">{note.content}</p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      {formatCommentDate(note.updatedAt)}
+                    </span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(note.id);
+                          setEditText(note.content);
+                        }}
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        title="Edit note"
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
+                      <notesFetcher.Form method="post">
+                        <input
+                          type="hidden"
+                          name="intent"
+                          value="delete-note"
+                        />
+                        <input type="hidden" name="noteId" value={note.id} />
+                        <button
+                          type="submit"
+                          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                          title="Delete note"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </notesFetcher.Form>
+                    </div>
+                  </div>
+                </div>
+              )
+            )
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 type CommentData = {

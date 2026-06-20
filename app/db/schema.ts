@@ -304,6 +304,25 @@ export const lessonBookmarks = sqliteTable("lesson_bookmarks", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Private per-student notes on individual lessons. A student can keep several
+// notes per lesson and edit/delete them at will; only the author ever sees them.
+export const lessonNotes = sqliteTable("lesson_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  lessonId: integer("lesson_id")
+    .notNull()
+    .references(() => lessons.id),
+  content: text("content").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 // In-app notifications. Generic by design (type/title/message/linkUrl) so new
 // event kinds can be added without touching the schema. Currently only
 // enrollment notifications are produced, delivered to instructors.
