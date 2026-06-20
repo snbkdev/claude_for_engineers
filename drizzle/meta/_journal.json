@@ -50,6 +50,13 @@
       "when": 1781770617427,
       "tag": "0006_easy_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1781940800330,
+      "tag": "0007_puzzling_miracleman",
+      "breakpoints": true
     }
   ]
 }

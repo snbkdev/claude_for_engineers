@@ -9,6 +9,7 @@ import {
 } from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUsersByRole } from "~/services/userService";
+import { getUserCertificates } from "~/services/certificateService";
 import { UserRole } from "~/db/schema";
 import { computeXp, levelFromXp } from "~/lib/gamification";
 import {
@@ -21,6 +22,7 @@ import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import {
   AlertTriangle,
+  Award,
   BookOpen,
   CheckCircle2,
   GraduationCap,
@@ -49,6 +51,11 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const enrolledCourses = getUserEnrolledCourses(currentUserId);
 
+  // Map courseId → certificate code for "View certificate" links.
+  const certificateByCourse = new Map(
+    getUserCertificates(currentUserId).map((c) => [c.courseId, c.code])
+  );
+
   const coursesWithProgress = enrolledCourses.map((enrollment) => {
     const progress = calculateProgress({
       userId: currentUserId,
@@ -74,6 +81,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       totalLessons,
       nextLessonId: nextLesson?.id ?? null,
       isCompleted,
+      certificateCode: certificateByCourse.get(enrollment.courseId) ?? null,
     };
   });
 
@@ -373,7 +381,18 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                         <span>Completed — {course.totalLessons} lessons</span>
                       </div>
                     </CardContent>
-                    <CardFooter>
+                    <CardFooter className="flex-col gap-2">
+                      {course.certificateCode && (
+                        <Link
+                          to={`/certificates/${course.certificateCode}`}
+                          className="w-full"
+                        >
+                          <Button className="w-full">
+                            <Award className="mr-2 size-4" />
+                            View Certificate
+                          </Button>
+                        </Link>
+                      )}
                       <Link
                         to={`/courses/${course.courseSlug}`}
                         className="w-full"

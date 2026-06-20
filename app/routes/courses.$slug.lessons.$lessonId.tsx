@@ -26,6 +26,7 @@ import {
   getBestAttempt,
 } from "~/services/quizService";
 import { submitQuizAttempt } from "~/services/quizScoringService";
+import { maybeCompleteCourse } from "~/services/certificateService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -353,6 +354,8 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "mark-complete") {
     markLessonComplete({ userId: currentUserId, lessonId });
+    // Completing this lesson may finish the course → mark complete + issue cert.
+    maybeCompleteCourse({ userId: currentUserId, courseId: course.id });
     return { success: true };
   }
 
@@ -381,6 +384,11 @@ export async function action({ params, request }: Route.ActionArgs) {
     });
     if (!outcome.ok) {
       throw data(outcome.error, { status: 400 });
+    }
+
+    // Passing a quiz auto-completes the lesson, which may finish the course.
+    if (outcome.result.lessonCompleted) {
+      maybeCompleteCourse({ userId: currentUserId, courseId: course.id });
     }
 
     return { quizResult: outcome.result };

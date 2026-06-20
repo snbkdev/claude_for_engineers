@@ -48,6 +48,9 @@ export default [
   ]),
   route("signup", "routes/signup.tsx"),
   route("login", "routes/login.tsx"),
+  // ─── Public certificate verification + PDF download ───
+  route("certificates/:code", "routes/certificates.$code.tsx"),
+  route("certificates/:code/pdf", "routes/certificates.$code.pdf.ts"),
   // ─── Dev-only throwaway prototype (live presence indicator) ───
   route("dev/presence", "routes/dev.presence.tsx"),
   route("api/dev/presence/:roomId", "routes/api.dev.presence.$roomId.ts"),

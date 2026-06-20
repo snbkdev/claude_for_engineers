@@ -322,6 +322,23 @@ export const notifications = sqliteTable("notifications", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Certificates issued when a student reaches 100% progress on a course. One per
+// (userId, courseId); the unique `code` backs the public verification page and
+// the PDF download. Issuance is idempotent (see certificateService).
+export const certificates = sqliteTable("certificates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  courseId: integer("course_id")
+    .notNull()
+    .references(() => courses.id),
+  code: text("code").notNull().unique(),
+  issuedAt: text("issued_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const courseRatings = sqliteTable("course_ratings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
