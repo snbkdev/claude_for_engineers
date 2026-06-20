@@ -17,6 +17,7 @@ type YouTubePlayerProps = {
   trackingEnabled: boolean;
   autoplay?: boolean;
   onToggleAutoplay?: () => void;
+  onAutoComplete?: () => void;
 };
 
 function extractVideoId(url: string): string | null {
@@ -72,16 +73,27 @@ export function YouTubePlayer({
   trackingEnabled,
   autoplay = false,
   onToggleAutoplay,
+  onAutoComplete,
 }: YouTubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YT.Player | null>(null);
-  const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
   const [progress, setProgress] = useState(initialProgress);
   const [videoDuration, setVideoDuration] = useState(
     durationMinutes ? durationMinutes * 60 : 0
   );
 
   const videoId = extractVideoId(videoUrl);
+
+  // Keep the latest callback in a ref so sendTrackingEvent stays referentially
+  // stable (the parent passes a fresh inline callback each render, and an
+  // unstable sendTrackingEvent would re-initialise the player).
+  const onAutoCompleteRef = useRef(onAutoComplete);
+  useEffect(() => {
+    onAutoCompleteRef.current = onAutoComplete;
+  }, [onAutoComplete]);
 
   const sendTrackingEvent = useCallback(
     (eventType: string, positionSeconds: number) => {
@@ -90,9 +102,14 @@ export function YouTubePlayer({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lessonId, eventType, positionSeconds }),
-      }).catch(() => {
-        // Silently fail — tracking is best-effort
-      });
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.autoCompleted) onAutoCompleteRef.current?.();
+        })
+        .catch(() => {
+          // Silently fail — tracking is best-effort
+        });
     },
     [lessonId, trackingEnabled]
   );
@@ -154,7 +171,11 @@ export function YouTubePlayer({
               if (d > 0) setVideoDuration(d);
             }
             if (autoplay && player && typeof player.playVideo === "function") {
-              try { player.playVideo(); } catch { /* silently fail */ }
+              try {
+                player.playVideo();
+              } catch {
+                /* silently fail */
+              }
             }
           },
           onStateChange: (event: YT.OnStateChangeEvent) => {
@@ -192,12 +213,22 @@ export function YouTubePlayer({
       }
       playerRef.current = null;
     };
-  }, [videoId, startPosition, autoplay, sendTrackingEvent, startTracking, stopTracking, updateProgress]);
+  }, [
+    videoId,
+    startPosition,
+    autoplay,
+    sendTrackingEvent,
+    startTracking,
+    stopTracking,
+    updateProgress,
+  ]);
 
   if (!videoId) {
     return (
       <div className="mb-8 flex aspect-video items-center justify-center rounded-lg bg-muted">
-        <p className="text-muted-foreground">Invalid or unsupported video URL</p>
+        <p className="text-muted-foreground">
+          Invalid or unsupported video URL
+        </p>
       </div>
     );
   }
@@ -230,9 +261,7 @@ export function YouTubePlayer({
               role="switch"
               aria-checked={autoplay}
               className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
-                autoplay
-                  ? "border-primary bg-primary"
-                  : "border-input bg-muted"
+                autoplay ? "border-primary bg-primary" : "border-input bg-muted"
               }`}
               onClick={onToggleAutoplay}
             >

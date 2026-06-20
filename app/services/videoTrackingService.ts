@@ -6,6 +6,17 @@ import { videoWatchEvents, lessons } from "~/db/schema";
 // Logs video watch events and calculates watch progress per lesson.
 // Functions with multiple same-typed params take a single object param.
 
+// Watch fraction (percent) at which a lesson auto-completes from video alone.
+export const VIDEO_COMPLETION_THRESHOLD = 90;
+
+// Pure decision: has the learner watched enough to auto-complete the lesson?
+// Reaching the end always counts, even when the lesson's duration is unknown.
+export function isVideoComplete(opts: { progress: number; eventType: string }) {
+  return (
+    opts.eventType === "ended" || opts.progress >= VIDEO_COMPLETION_THRESHOLD
+  );
+}
+
 export function logWatchEvent(opts: {
   userId: number;
   lessonId: number;

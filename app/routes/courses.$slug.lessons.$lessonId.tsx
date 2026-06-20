@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link, useFetcher, useNavigate } from "react-router";
+import { Link, useFetcher, useNavigate, useRevalidator } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
 import {
@@ -19,6 +19,7 @@ import {
 import {
   getLastWatchPosition,
   calculateWatchProgress,
+  getUserWatchHistory,
 } from "~/services/videoTrackingService";
 import {
   getQuizByLessonId,
@@ -171,6 +172,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lessonProgressMap: Record<number, string> = {};
   let isBookmarked = false;
   let bookmarkedLessonIds: number[] = [];
+  let videoProgressMap: Record<number, number> = {};
 
   if (currentUserId) {
     enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
@@ -196,12 +198,34 @@ export async function loader({ params, request }: Route.LoaderArgs) {
         lessonProgressMap[record.lessonId] = record.status;
       }
 
+      // Per-lesson video watch progress (%) for the curriculum sidebar.
+      const lastPosByLesson = new Map(
+        getUserWatchHistory(currentUserId).map((h) => [
+          h.lessonId,
+          h.lastPosition,
+        ])
+      );
+      for (const m of courseWithDetails.modules) {
+        for (const l of m.lessons) {
+          const durationSeconds = (l.durationMinutes ?? 0) * 60;
+          const pos = lastPosByLesson.get(l.id) ?? 0;
+          if (durationSeconds > 0 && pos > 0) {
+            videoProgressMap[l.id] = Math.min(
+              Math.round((pos / durationSeconds) * 100),
+              100
+            );
+          }
+        }
+      }
+
       // Get video watch state for resume and progress display
       if (lesson.videoUrl) {
-        lastWatchPosition = getLastWatchPosition({
-          userId: currentUserId,
-          lessonId,
-        });
+        // Resume from the saved position, but restart a completed lesson from
+        // the beginning (its last event is "ended" near the very end).
+        lastWatchPosition =
+          lessonStatus === LessonProgressStatus.Completed
+            ? 0
+            : getLastWatchPosition({ userId: currentUserId, lessonId });
         const videoDurationSeconds = (lesson.durationMinutes ?? 0) * 60;
         if (videoDurationSeconds > 0) {
           watchProgress = calculateWatchProgress({
@@ -352,6 +376,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     lastWatchPosition,
     watchProgress,
     lessonProgressMap,
+    videoProgressMap,
     pppBlocked,
     pppBlockedCountry,
     pppPurchaseCountry,
@@ -595,6 +620,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     lastWatchPosition,
     watchProgress,
     lessonProgressMap,
+    videoProgressMap,
     pppBlocked,
     pppBlockedCountry,
     pppPurchaseCountry,
@@ -630,6 +656,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
   const quizError = quizFetcher.data?.quizError ?? null;
   const isSubmittingQuiz = quizFetcher.state !== "idle";
   const notesFetcher = useFetcher({ key: `notes-${lesson.id}` });
+  const revalidator = useRevalidator();
 
   if (pppBlocked) {
     const purchaseCountryName = pppPurchaseCountry
@@ -677,6 +704,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
         curriculum={curriculum}
         currentLessonId={lesson.id}
         lessonProgressMap={lessonProgressMap}
+        videoProgressMap={videoProgressMap}
         enrolled={enrolled}
         bookmarkedLessonIds={bookmarkedLessonIds}
       />
@@ -745,6 +773,10 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
                 trackingEnabled={enrolled && !!currentUserId}
                 autoplay={autoplay}
                 onToggleAutoplay={toggleAutoplay}
+                onAutoComplete={() => {
+                  toast.success("Lesson completed!");
+                  revalidator.revalidate();
+                }}
               />
             )}
 
@@ -927,6 +959,7 @@ function CurriculumSidebar({
   curriculum,
   currentLessonId,
   lessonProgressMap,
+  videoProgressMap,
   enrolled,
   bookmarkedLessonIds,
 }: {
@@ -938,6 +971,7 @@ function CurriculumSidebar({
   }>;
   currentLessonId: number;
   lessonProgressMap: Record<number, string>;
+  videoProgressMap: Record<number, number>;
   enrolled: boolean;
   bookmarkedLessonIds: number[];
 }) {
@@ -1013,6 +1047,11 @@ function CurriculumSidebar({
                         status === LessonProgressStatus.Completed;
                       const isInProgress =
                         status === LessonProgressStatus.InProgress;
+                      // Show video watch progress only while a lesson is still
+                      // unfinished (completed lessons get the green check).
+                      const videoPct = videoProgressMap[l.id] ?? 0;
+                      const showVideoBar =
+                        enrolled && !isCompleted && videoPct > 0;
 
                       return (
                         <li key={l.id}>
@@ -1041,6 +1080,17 @@ function CurriculumSidebar({
                               <Bookmark className="size-3.5 shrink-0 fill-amber-500 text-amber-500" />
                             )}
                           </Link>
+                          {showVideoBar && (
+                            <div
+                              className="mx-3 mb-1 h-1 overflow-hidden rounded-full bg-muted"
+                              title={`Watched ${videoPct}%`}
+                            >
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{ width: `${videoPct}%` }}
+                              />
+                            </div>
+                          )}
                         </li>
                       );
                     })}
