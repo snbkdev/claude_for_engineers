@@ -323,6 +323,21 @@ export const lessonNotes = sqliteTable("lesson_notes", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Attachments/resources an instructor adds to a lesson (slides, source, links).
+// `type` is a free-form label rendered with a generic icon.
+export const lessonResources = sqliteTable("lesson_resources", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  lessonId: integer("lesson_id")
+    .notNull()
+    .references(() => lessons.id),
+  title: text("title").notNull(),
+  url: text("url").notNull(),
+  type: text("type"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 // In-app notifications. Generic by design (type/title/message/linkUrl) so new
 // event kinds can be added without touching the schema. Currently only
 // enrollment notifications are produced, delivered to instructors.

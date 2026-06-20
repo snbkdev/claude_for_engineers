@@ -55,6 +55,8 @@ import {
   StickyNote,
   Pencil,
   Plus,
+  Paperclip,
+  ExternalLink,
 } from "lucide-react";
 import { cn, formatDuration } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
@@ -87,6 +89,7 @@ import {
   updateNote,
   deleteNote,
 } from "~/services/noteService";
+import { getResourcesForLesson } from "~/services/resourceService";
 
 const lessonParamsSchema = v.object({
   slug: v.pipe(v.string(), v.minLength(1)),
@@ -279,6 +282,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       ? getNotesForLesson({ userId: currentUserId, lessonId })
       : [];
 
+  // Lesson attachments/resources (not sensitive — shown to any viewer).
+  const resources = getResourcesForLesson(lessonId);
+
   // Render lesson content from Markdown to HTML server-side
   const contentHtml = lesson.content
     ? await renderMarkdown(lesson.content)
@@ -386,6 +392,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     isBookmarked,
     bookmarkedLessonIds,
     notes,
+    resources,
   };
 }
 
@@ -630,6 +637,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     isBookmarked,
     bookmarkedLessonIds,
     notes,
+    resources,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
@@ -792,6 +800,43 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
               <Card className="mb-8">
                 <CardContent className="py-12 text-center text-muted-foreground">
                   No content has been added to this lesson yet.
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Lesson materials */}
+            {resources.length > 0 && (
+              <Card className="mb-8">
+                <CardContent className="p-6">
+                  <div className="mb-4 flex items-center gap-2">
+                    <Paperclip className="size-5 text-primary" />
+                    <h2 className="text-xl font-semibold">Lesson materials</h2>
+                  </div>
+                  <ul className="space-y-2">
+                    {resources.map((r) => (
+                      <li key={r.id}>
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-muted"
+                        >
+                          <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate font-medium">
+                              {r.title}
+                            </span>
+                            {r.type && (
+                              <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                                {r.type}
+                              </span>
+                            )}
+                          </div>
+                          <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
             )}

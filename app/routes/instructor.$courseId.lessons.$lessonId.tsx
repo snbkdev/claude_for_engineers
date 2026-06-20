@@ -6,6 +6,12 @@ import { getCourseById } from "~/services/courseService";
 import { getLessonById, updateLesson } from "~/services/lessonService";
 import { getModuleById } from "~/services/moduleService";
 import { getQuizByLessonId } from "~/services/quizService";
+import {
+  getResourcesForLesson,
+  getResourceById,
+  createResource,
+  deleteResource,
+} from "~/services/resourceService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { UserRole } from "~/db/schema";
@@ -14,7 +20,17 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { MonacoMarkdownEditor } from "~/components/monaco-markdown-editor";
-import { AlertTriangle, ArrowLeft, ClipboardList, ExternalLink, Github, Save } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ClipboardList,
+  ExternalLink,
+  Github,
+  Save,
+  Paperclip,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { data, isRouteErrorResponse } from "react-router";
 import * as v from "valibot";
 import { parseFormData, parseParams } from "~/lib/validation";
@@ -31,6 +47,24 @@ const updateLessonSchema = v.object({
   durationMinutes: v.optional(v.string()),
   githubRepoUrl: v.optional(v.pipe(v.string(), v.trim())),
 });
+
+const addResourceSchema = v.object({
+  intent: v.literal("add-resource"),
+  title: v.pipe(v.string(), v.trim(), v.minLength(1, "Title is required.")),
+  url: v.pipe(v.string(), v.trim(), v.minLength(1, "URL is required.")),
+  type: v.optional(v.pipe(v.string(), v.trim())),
+});
+
+const deleteResourceSchema = v.object({
+  intent: v.literal("delete-resource"),
+  resourceId: v.pipe(v.string(), v.transform(Number), v.integer()),
+});
+
+const lessonActionSchema = v.variant("intent", [
+  updateLessonSchema,
+  addResourceSchema,
+  deleteResourceSchema,
+]);
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.lesson?.title ?? "Edit Lesson";
@@ -51,7 +85,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   const user = getUserById(currentUserId);
 
-  if (!user || (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)) {
+  if (
+    !user ||
+    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
+  ) {
     throw data("Only instructors and admins can access this page.", {
       status: 403,
     });
@@ -88,8 +125,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   const quiz = getQuizByLessonId(lessonId);
+  const resources = getResourcesForLesson(lessonId);
 
-  return { course, lesson, module: mod, quiz };
+  return { course, lesson, module: mod, quiz, resources };
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
@@ -100,11 +138,19 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const user = getUserById(currentUserId);
-  if (!user || (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)) {
-    throw data("Only instructors and admins can edit lessons.", { status: 403 });
+  if (
+    !user ||
+    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
+  ) {
+    throw data("Only instructors and admins can edit lessons.", {
+      status: 403,
+    });
   }
 
-  const { courseId, lessonId } = parseParams(params, instructorLessonParamsSchema);
+  const { courseId, lessonId } = parseParams(
+    params,
+    instructorLessonParamsSchema
+  );
 
   const course = getCourseById(courseId);
   if (!course) {
@@ -126,18 +172,47 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const formData = await request.formData();
-  const parsed = parseFormData(formData, updateLessonSchema);
+  const parsed = parseFormData(formData, lessonActionSchema);
 
   if (!parsed.success) {
-    return data({ error: Object.values(parsed.errors)[0] ?? "Invalid input." }, { status: 400 });
+    return data(
+      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
+      { status: 400 }
+    );
+  }
+
+  if (parsed.data.intent === "add-resource") {
+    const { title, url, type } = parsed.data;
+    createResource({ lessonId, title, url, type: type ?? null });
+    return { success: true };
+  }
+
+  if (parsed.data.intent === "delete-resource") {
+    const resource = getResourceById(parsed.data.resourceId);
+    if (!resource || resource.lessonId !== lessonId) {
+      throw data("Resource not found.", { status: 404 });
+    }
+    deleteResource(resource.id);
+    return { success: true };
   }
 
   if (parsed.data.intent === "update-lesson") {
-    const { content, videoUrl, durationMinutes: durationStr, githubRepoUrl } = parsed.data;
+    const {
+      content,
+      videoUrl,
+      durationMinutes: durationStr,
+      githubRepoUrl,
+    } = parsed.data;
     const durationMinutes = durationStr ? parseInt(durationStr, 10) : null;
 
-    if (durationMinutes !== null && (isNaN(durationMinutes) || durationMinutes < 0)) {
-      return data({ error: "Duration must be a positive number." }, { status: 400 });
+    if (
+      durationMinutes !== null &&
+      (isNaN(durationMinutes) || durationMinutes < 0)
+    ) {
+      return data(
+        { error: "Duration must be a positive number." },
+        { status: 400 }
+      );
     }
 
     updateLesson({
@@ -157,8 +232,9 @@ export async function action({ params, request }: Route.ActionArgs) {
 export default function InstructorLessonEditor({
   loaderData,
 }: Route.ComponentProps) {
-  const { course, lesson, module: mod, quiz } = loaderData;
+  const { course, lesson, module: mod, quiz, resources } = loaderData;
   const fetcher = useFetcher();
+  const resourceFetcher = useFetcher();
 
   const [content, setContent] = useState(lesson.content ?? "");
   const [videoUrl, setVideoUrl] = useState(lesson.videoUrl ?? "");
@@ -168,6 +244,10 @@ export default function InstructorLessonEditor({
   const [githubRepoUrl, setGithubRepoUrl] = useState(
     lesson.githubRepoUrl ?? ""
   );
+
+  const [resTitle, setResTitle] = useState("");
+  const [resUrl, setResUrl] = useState("");
+  const [resType, setResType] = useState("");
 
   const hasChanges =
     content !== (lesson.content ?? "") ||
@@ -194,6 +274,24 @@ export default function InstructorLessonEditor({
       toast.error(fetcher.data.error);
     }
   }, [fetcher.state, fetcher.data]);
+
+  useEffect(() => {
+    if (resourceFetcher.state === "idle" && resourceFetcher.data?.success) {
+      setResTitle("");
+      setResUrl("");
+      setResType("");
+    }
+    if (resourceFetcher.state === "idle" && resourceFetcher.data?.error) {
+      toast.error(resourceFetcher.data.error);
+    }
+  }, [resourceFetcher.state, resourceFetcher.data]);
+
+  function handleAddResource() {
+    resourceFetcher.submit(
+      { intent: "add-resource", title: resTitle, url: resUrl, type: resType },
+      { method: "post" }
+    );
+  }
 
   function handleSave() {
     fetcher.submit(
@@ -225,10 +323,7 @@ export default function InstructorLessonEditor({
               <Button variant="outline" onClick={() => blocker.reset()}>
                 Stay on Page
               </Button>
-              <Button
-                variant="destructive"
-                onClick={() => blocker.proceed()}
-              >
+              <Button variant="destructive" onClick={() => blocker.proceed()}>
                 Leave Page
               </Button>
             </CardContent>
@@ -242,10 +337,7 @@ export default function InstructorLessonEditor({
           My Courses
         </Link>
         <span className="mx-2">/</span>
-        <Link
-          to={`/instructor/${course.id}`}
-          className="hover:text-foreground"
-        >
+        <Link to={`/instructor/${course.id}`} className="hover:text-foreground">
           {course.title}
         </Link>
         <span className="mx-2">/</span>
@@ -361,6 +453,106 @@ export default function InstructorLessonEditor({
           </CardContent>
         </Card>
 
+        {/* Resources */}
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-semibold">Resources</h2>
+            <p className="text-sm text-muted-foreground">
+              Attach slides, source code, checklists or any link for this
+              lesson.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {resources.length > 0 ? (
+              <ul className="space-y-2">
+                {resources.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center gap-3 rounded-lg border p-3"
+                  >
+                    <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <a
+                        href={r.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 truncate font-medium hover:text-primary"
+                      >
+                        {r.title}
+                        <ExternalLink className="size-3.5 shrink-0" />
+                      </a>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {r.type ? `${r.type} · ` : ""}
+                        {r.url}
+                      </p>
+                    </div>
+                    <resourceFetcher.Form method="post">
+                      <input
+                        type="hidden"
+                        name="intent"
+                        value="delete-resource"
+                      />
+                      <input type="hidden" name="resourceId" value={r.id} />
+                      <button
+                        type="submit"
+                        title="Delete resource"
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </resourceFetcher.Form>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">No resources yet.</p>
+            )}
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_8rem_auto] sm:items-end">
+              <div className="space-y-1">
+                <Label htmlFor="resTitle">Title</Label>
+                <Input
+                  id="resTitle"
+                  value={resTitle}
+                  onChange={(e) => setResTitle(e.target.value)}
+                  placeholder="Slides"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="resUrl">URL</Label>
+                <Input
+                  id="resUrl"
+                  type="url"
+                  value={resUrl}
+                  onChange={(e) => setResUrl(e.target.value)}
+                  placeholder="https://..."
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="resType">Type</Label>
+                <Input
+                  id="resType"
+                  value={resType}
+                  onChange={(e) => setResType(e.target.value)}
+                  placeholder="pdf"
+                />
+              </div>
+              <Button
+                type="button"
+                onClick={handleAddResource}
+                disabled={
+                  !resTitle.trim() ||
+                  !resUrl.trim() ||
+                  resourceFetcher.state !== "idle"
+                }
+              >
+                <Plus className="mr-1.5 size-4" />
+                Add
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Quiz */}
         <Card>
           <CardHeader>
@@ -372,9 +564,7 @@ export default function InstructorLessonEditor({
             </p>
           </CardHeader>
           <CardContent>
-            <Link
-              to={`/instructor/${course.id}/lessons/${lesson.id}/quiz`}
-            >
+            <Link to={`/instructor/${course.id}/lessons/${lesson.id}/quiz`}>
               <Button variant="outline">
                 <ClipboardList className="mr-1.5 size-4" />
                 {quiz ? "Edit Quiz" : "Create Quiz"}
@@ -410,13 +600,20 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   if (isRouteErrorResponse(error)) {
     if (error.status === 404) {
       title = "Lesson not found";
-      message = "The lesson you're looking for doesn't exist or may have been removed.";
+      message =
+        "The lesson you're looking for doesn't exist or may have been removed.";
     } else if (error.status === 401) {
       title = "Sign in required";
-      message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "Please select a user from the DevUI panel.";
     } else if (error.status === 403) {
       title = "Access denied";
-      message = typeof error.data === "string" ? error.data : "You don't have permission to edit this lesson.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "You don't have permission to edit this lesson.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

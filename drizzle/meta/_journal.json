@@ -64,6 +64,13 @@
       "when": 1781944720804,
       "tag": "0008_fluffy_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1781946905397,
+      "tag": "0009_supreme_otto_octavius",
+      "breakpoints": true
     }
   ]
 }
