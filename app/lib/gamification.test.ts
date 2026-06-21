@@ -3,6 +3,7 @@ import {
   computeXp,
   levelFromXp,
   longestDailyStreak,
+  currentDailyStreak,
   XP_PER_LESSON,
   XP_PER_COURSE,
   XP_PER_LEVEL,
@@ -96,5 +97,47 @@ describe("longestDailyStreak", () => {
     expect(longestDailyStreak(["not-a-date", "2026-06-01T10:00:00.000Z"])).toBe(
       1
     );
+  });
+});
+
+describe("currentDailyStreak", () => {
+  const now = new Date("2026-06-10T15:00:00.000Z");
+
+  it("is zero with no activity", () => {
+    expect(currentDailyStreak([], now)).toBe(0);
+  });
+
+  it("counts consecutive days ending today", () => {
+    const dates = [
+      "2026-06-08T09:00:00.000Z",
+      "2026-06-09T09:00:00.000Z",
+      "2026-06-10T09:00:00.000Z",
+    ];
+    expect(currentDailyStreak(dates, now)).toBe(3);
+  });
+
+  it("stays alive when the last activity was yesterday", () => {
+    const dates = ["2026-06-08T09:00:00.000Z", "2026-06-09T09:00:00.000Z"];
+    expect(currentDailyStreak(dates, now)).toBe(2);
+  });
+
+  it("is zero when the last activity is two or more days ago", () => {
+    const dates = ["2026-06-07T09:00:00.000Z", "2026-06-08T09:00:00.000Z"];
+    expect(currentDailyStreak(dates, now)).toBe(0);
+  });
+
+  it("only counts the run ending today, ignoring earlier runs", () => {
+    const dates = [
+      "2026-06-01T09:00:00.000Z",
+      "2026-06-02T09:00:00.000Z", // older broken run
+      "2026-06-09T09:00:00.000Z",
+      "2026-06-10T09:00:00.000Z", // current run = 2
+    ];
+    expect(currentDailyStreak(dates, now)).toBe(2);
+  });
+
+  it("dedupes multiple activities on the same day", () => {
+    const dates = ["2026-06-10T08:00:00.000Z", "2026-06-10T20:00:00.000Z"];
+    expect(currentDailyStreak(dates, now)).toBe(1);
   });
 });

@@ -35,6 +35,24 @@ export interface LevelInfo {
   progressPct: number;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** ISO timestamps → set of distinct UTC day strings (YYYY-MM-DD). */
+function toUtcDaySet(isoTimestamps: Array<string | null>): Set<string> {
+  const days = new Set<string>();
+  for (const ts of isoTimestamps) {
+    if (!ts) continue;
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) continue;
+    days.add(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+function dayString(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
 /**
  * Longest run of consecutive calendar days (UTC) present in a list of ISO
  * timestamps. Days are deduped, so several activities on one day count once.
@@ -45,17 +63,10 @@ export interface LevelInfo {
 export function longestDailyStreak(
   isoTimestamps: Array<string | null>
 ): number {
-  const days = new Set<string>();
-  for (const ts of isoTimestamps) {
-    if (!ts) continue;
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) continue;
-    days.add(d.toISOString().slice(0, 10)); // YYYY-MM-DD (UTC)
-  }
+  const days = toUtcDaySet(isoTimestamps);
   if (days.size === 0) return 0;
 
   const sorted = [...days].sort();
-  const DAY_MS = 24 * 60 * 60 * 1000;
   let longest = 1;
   let run = 1;
   for (let i = 1; i < sorted.length; i++) {
@@ -69,6 +80,36 @@ export function longestDailyStreak(
     }
   }
   return longest;
+}
+
+/**
+ * Current streak: the number of consecutive active days ending today. The
+ * streak is considered "alive" if the most recent activity was today or
+ * yesterday (so it doesn't break the moment a new UTC day starts before the
+ * user logs in); if the last active day is two or more days ago it is 0.
+ * `now` is injectable for deterministic tests.
+ */
+export function currentDailyStreak(
+  isoTimestamps: Array<string | null>,
+  now: Date = new Date()
+): number {
+  const days = toUtcDaySet(isoTimestamps);
+  if (days.size === 0) return 0;
+
+  const todayMs = Date.parse(dayString(now.getTime()));
+  let cursor = todayMs;
+  if (!days.has(dayString(cursor))) {
+    // Not active today — the streak can still be alive from yesterday.
+    cursor -= DAY_MS;
+    if (!days.has(dayString(cursor))) return 0;
+  }
+
+  let streak = 0;
+  while (days.has(dayString(cursor))) {
+    streak += 1;
+    cursor -= DAY_MS;
+  }
+  return streak;
 }
 
 /** Map a total XP figure to a level and progress within that level. */

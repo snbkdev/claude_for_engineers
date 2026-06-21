@@ -8,6 +8,7 @@ import {
   getCompletedLessonCount,
   getTotalLessonCount,
   getNextIncompleteLesson,
+  getCompletionDatesForUser,
 } from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUsersByRole } from "~/services/userService";
@@ -17,7 +18,12 @@ import {
   getAchievementShowcase,
 } from "~/services/achievementService";
 import { UserRole } from "~/db/schema";
-import { computeXp, levelFromXp } from "~/lib/gamification";
+import {
+  computeXp,
+  levelFromXp,
+  currentDailyStreak,
+  longestDailyStreak,
+} from "~/lib/gamification";
 import {
   Card,
   CardContent,
@@ -113,6 +119,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   });
   const level = levelFromXp(totalXp);
 
+  // Daily learning streak (from lesson-completion dates).
+  const activityDates = getCompletionDatesForUser(currentUserId);
+  const streak = {
+    current: currentDailyStreak(activityDates),
+    longest: longestDailyStreak(activityDates),
+  };
+
   // A few other learners' avatars (decorative "fellow learners" cluster).
   const otherLearners = getUsersByRole(UserRole.Student)
     .filter((u) => u.id !== currentUserId && u.avatarUrl)
@@ -128,6 +141,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     inProgressCourses,
     completedCourses,
     level,
+    streak,
     otherLearners,
     newAchievements,
     achievementShowcase,
@@ -159,12 +173,46 @@ interface Learner {
   name: string;
   avatarUrl: string | null;
 }
+interface Streak {
+  current: number;
+  longest: number;
+}
+
+function StreakChip({ streak }: { streak: Streak }) {
+  const active = streak.current > 0;
+  return (
+    <div
+      title={
+        active
+          ? `Longest streak: ${streak.longest} day${streak.longest === 1 ? "" : "s"}`
+          : "Complete a lesson today to start a streak"
+      }
+      className={cn(
+        "flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-inset backdrop-blur",
+        active
+          ? "bg-white/15 text-white ring-white/25"
+          : "bg-white/5 text-white/70 ring-white/15"
+      )}
+    >
+      <Flame className={cn("size-4", active && "text-amber-300")} />
+      {active ? (
+        <span>
+          {streak.current} day{streak.current === 1 ? "" : "s"} streak
+        </span>
+      ) : (
+        <span>No streak yet</span>
+      )}
+    </div>
+  );
+}
 
 function LevelHeader({
   level,
+  streak,
   otherLearners,
 }: {
   level: LevelInfo;
+  streak: Streak;
   otherLearners: Learner[];
 }) {
   return (
@@ -200,23 +248,26 @@ function LevelHeader({
           </div>
         </div>
 
-        {/* Fellow learners */}
-        {otherLearners.length > 0 && (
-          <div className="flex items-center gap-3">
-            <div className="flex -space-x-2">
-              {otherLearners.map((learner) => (
-                <img
-                  key={learner.id}
-                  src={learner.avatarUrl ?? undefined}
-                  alt={learner.name}
-                  title={learner.name}
-                  className="size-9 rounded-full bg-white/90 ring-2 ring-violet-500"
-                />
-              ))}
+        {/* Streak + fellow learners */}
+        <div className="flex flex-col items-start gap-3 sm:items-end">
+          <StreakChip streak={streak} />
+          {otherLearners.length > 0 && (
+            <div className="flex items-center gap-3">
+              <div className="flex -space-x-2">
+                {otherLearners.map((learner) => (
+                  <img
+                    key={learner.id}
+                    src={learner.avatarUrl ?? undefined}
+                    alt={learner.name}
+                    title={learner.name}
+                    className="size-9 rounded-full bg-white/90 ring-2 ring-violet-500"
+                  />
+                ))}
+              </div>
+              <span className="text-xs text-white/80">Fellow learners</span>
             </div>
-            <span className="text-xs text-white/80">Fellow learners</span>
-          </div>
-        )}
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -349,6 +400,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     inProgressCourses,
     completedCourses,
     level,
+    streak,
     otherLearners,
     newAchievements,
     achievementShowcase,
@@ -382,7 +434,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         </p>
       </div>
 
-      <LevelHeader level={level} otherLearners={otherLearners} />
+      <LevelHeader
+        level={level}
+        streak={streak}
+        otherLearners={otherLearners}
+      />
 
       <AchievementsShowcase achievements={achievementShowcase} />
 

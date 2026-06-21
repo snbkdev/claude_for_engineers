@@ -277,6 +277,23 @@ export function getNextIncompleteLesson(opts: {
   return null;
 }
 
+// All lesson-completion timestamps for a user (across every course), used as
+// the activity signal for streak calculation. Order is irrelevant — the streak
+// helpers dedupe to days and sort internally.
+export function getCompletionDatesForUser(userId: number): string[] {
+  const rows = db
+    .select({ completedAt: lessonProgress.completedAt })
+    .from(lessonProgress)
+    .where(
+      and(
+        eq(lessonProgress.userId, userId),
+        eq(lessonProgress.status, LessonProgressStatus.Completed)
+      )
+    )
+    .all();
+  return rows.map((r) => r.completedAt).filter((d): d is string => d !== null);
+}
+
 export function getRecentlyProgressedCourses(opts: {
   userId: number;
   limit?: number;
