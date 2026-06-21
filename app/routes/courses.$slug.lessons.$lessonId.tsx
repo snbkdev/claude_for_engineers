@@ -63,6 +63,7 @@ import {
 import { cn, formatDuration } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
 import { YouTubePlayer } from "~/components/youtube-player";
+import { LessonPresence } from "~/components/lesson-presence";
 import { data, isRouteErrorResponse } from "react-router";
 import * as v from "valibot";
 import { resolveCountry } from "~/lib/country.server";
@@ -848,6 +849,9 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
               )}
               {enrolled && currentUserId && (
                 <LessonBookmarkButton isBookmarked={isBookmarked} />
+              )}
+              {(enrolled || isInstructor) && (
+                <LessonPresence lessonId={lesson.id} className="ml-auto" />
               )}
             </div>
 

@@ -2,9 +2,10 @@ import { EventEmitter } from "node:events";
 
 // ─── Presence Registry ───
 //
-// REUSABLE ASSET (see plans/live-presence-prototype.md). An in-memory,
-// per-process presence registry + per-room event fan-out, used by the live
-// presence indicator (see plans/live-presence-indicator-research.md §4).
+// REUSABLE ASSET. An in-memory, per-process presence registry + per-room event
+// fan-out, used by the live presence indicator (see
+// plans/live-presence-indicator-research.md §4). The SSE transport lives in
+// app/routes/api.lessons.$lessonId.presence.ts.
 //
 // It is intentionally framework-agnostic and transport-agnostic: it knows
 // nothing about SSE, React Router, or HTTP. A transport (the SSE route) calls

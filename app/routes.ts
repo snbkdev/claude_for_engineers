@@ -54,9 +54,11 @@ export default [
   // ─── Public certificate verification + PDF download ───
   route("certificates/:code", "routes/certificates.$code.tsx"),
   route("certificates/:code/pdf", "routes/certificates.$code.pdf.ts"),
-  // ─── Dev-only throwaway prototype (live presence indicator) ───
-  route("dev/presence", "routes/dev.presence.tsx"),
-  route("api/dev/presence/:roomId", "routes/api.dev.presence.$roomId.ts"),
+  // ─── Live presence (SSE): "N watching this lesson now" ───
+  route(
+    "api/lessons/:lessonId/presence",
+    "routes/api.lessons.$lessonId.presence.ts"
+  ),
   route("api/switch-user", "routes/api.switch-user.ts"),
   route("api/logout", "routes/api.logout.ts"),
   route("api/video-tracking", "routes/api.video-tracking.ts"),
