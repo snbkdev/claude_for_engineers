@@ -19,6 +19,7 @@ import {
   couponCountryMatches,
 } from "./transactionService";
 import { getCouponByCode } from "./couponService";
+import { createPromo, getPromoByCode } from "./promoService";
 import { getNotifications } from "./notificationService";
 
 // The full course row the routes hold.
@@ -37,6 +38,30 @@ function createUser(name: string, email: string) {
     .values({ name, email, role: schema.UserRole.Student })
     .returning()
     .get();
+}
+
+// A paid course with PPP off, so promo math is isolated from PPP discounts.
+function paidCourse(price: number) {
+  const c = testDb
+    .insert(schema.courses)
+    .values({
+      title: "Paid Course",
+      slug: `paid-${Math.random().toString(36).slice(2)}`,
+      description: "d",
+      instructorId: base.instructor.id,
+      categoryId: base.category.id,
+      status: schema.CourseStatus.Published,
+      price,
+      pppEnabled: false,
+    })
+    .returning()
+    .get();
+  return {
+    id: c.id,
+    price: c.price,
+    pppEnabled: c.pppEnabled,
+    instructorId: base.instructor.id,
+  };
 }
 
 describe("transactionService", () => {
@@ -418,6 +443,64 @@ describe("transactionService", () => {
       });
       expect(result.ok).toBe(false);
       expect(getNotifications(base.user.id, 10, 0)).toHaveLength(0);
+    });
+  });
+
+  describe("promo codes", () => {
+    it("buyForSelf applies a valid promo and records its redemption", () => {
+      const c = paidCourse(10000);
+      createPromo({
+        code: "SAVE25",
+        discountType: schema.PromoDiscountType.Percent,
+        discountValue: 25,
+      });
+
+      const result = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        promoCode: "save25",
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.purchase.pricePaid).toBe(7500);
+      expect(getPromoByCode("SAVE25")?.redemptionCount).toBe(1);
+    });
+
+    it("buyForSelf fails (no purchase) when the promo is invalid", () => {
+      const c = paidCourse(10000);
+      const result = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        promoCode: "GHOST",
+      });
+      expect(result.ok).toBe(false);
+
+      const purchases = testDb.select().from(schema.purchases).all();
+      expect(purchases).toHaveLength(0);
+    });
+
+    it("buyForTeam applies the promo per seat and counts one redemption", () => {
+      const c = paidCourse(10000);
+      createPromo({
+        code: "TENOFF",
+        discountType: schema.PromoDiscountType.Fixed,
+        discountValue: 1000,
+      });
+
+      const result = buyForTeam({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        quantity: 3,
+        promoCode: "TENOFF",
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // (10000 − 1000) × 3
+      expect(result.data.purchase.pricePaid).toBe(27000);
+      expect(getPromoByCode("TENOFF")?.redemptionCount).toBe(1);
     });
   });
 });

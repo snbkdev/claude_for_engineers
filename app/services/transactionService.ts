@@ -17,6 +17,12 @@ import { findEnrollment } from "./enrollmentService";
 import { getCouponByCode, generateCoupons } from "./couponService";
 import { createPurchase } from "./purchaseService";
 import { createNotification } from "./notificationService";
+import {
+  validatePromo,
+  computeDiscountedPrice,
+  incrementPromoRedemption,
+  type Promo,
+} from "./promoService";
 
 // ─── Transaction Service ───
 // Deep module owning the full purchase/coupon/enrollment lifecycle behind a
@@ -60,6 +66,34 @@ function resolvePrice(course: CourseLike, country: string | null): number {
   return course.pppEnabled
     ? calculatePppPrice(course.price, country)
     : course.price;
+}
+
+// Resolves the per-seat price for a purchase: PPP first, then an optional promo
+// code applied on top (a pricing strategy). Returns the validated promo so the
+// caller can record its redemption inside the purchase transaction. A bad promo
+// code fails the whole purchase rather than silently charging full price.
+function resolvePricing(opts: {
+  course: CourseLike;
+  country: string | null;
+  promoCode?: string | null;
+}): Result<{ unitPrice: number; promo: Promo | null }> {
+  const base = resolvePrice(opts.course, opts.country);
+  const code = opts.promoCode?.trim();
+  if (!code) {
+    return { ok: true, data: { unitPrice: base, promo: null } };
+  }
+
+  const validation = validatePromo({ code });
+  if (!validation.ok) {
+    return { ok: false, error: validation.error };
+  }
+  return {
+    ok: true,
+    data: {
+      unitPrice: computeDiscountedPrice(base, validation.promo),
+      promo: validation.promo,
+    },
+  };
 }
 
 // ─── Notifications (fired after commit) ───
@@ -154,6 +188,7 @@ export function buyForSelf(opts: {
   userId: number;
   course: CourseLike;
   country: string | null;
+  promoCode?: string | null;
 }): Result<{
   purchase: typeof purchases.$inferSelect;
   enrollment: typeof enrollments.$inferSelect;
@@ -166,13 +201,19 @@ export function buyForSelf(opts: {
     return { ok: false, error: "You are already enrolled in this course" };
   }
 
-  const pricePaid = resolvePrice(opts.course, opts.country);
+  const pricing = resolvePricing({
+    course: opts.course,
+    country: opts.country,
+    promoCode: opts.promoCode,
+  });
+  if (!pricing.ok) return pricing;
+  const { unitPrice, promo } = pricing.data;
 
   const result = db.transaction(() => {
     const purchase = createPurchase({
       userId: opts.userId,
       courseId: opts.course.id,
-      pricePaid,
+      pricePaid: unitPrice,
       country: opts.country,
     });
     const enrollment = db
@@ -180,6 +221,7 @@ export function buyForSelf(opts: {
       .values({ userId: opts.userId, courseId: opts.course.id })
       .returning()
       .get();
+    if (promo) incrementPromoRedemption(promo.id);
     return { purchase, enrollment };
   });
 
@@ -199,6 +241,7 @@ export function buyForTeam(opts: {
   course: CourseLike;
   country: string | null;
   quantity: number;
+  promoCode?: string | null;
 }): Result<{
   purchase: typeof purchases.$inferSelect;
   team: typeof teams.$inferSelect;
@@ -208,7 +251,15 @@ export function buyForTeam(opts: {
     return { ok: false, error: "You can't purchase your own course" };
   }
 
-  const pricePaid = resolvePrice(opts.course, opts.country) * opts.quantity;
+  const pricing = resolvePricing({
+    course: opts.course,
+    country: opts.country,
+    promoCode: opts.promoCode,
+  });
+  if (!pricing.ok) return pricing;
+  const { unitPrice, promo } = pricing.data;
+  // Discount applies per seat; the promo counts as one redemption per checkout.
+  const pricePaid = unitPrice * opts.quantity;
 
   const result = db.transaction(() => {
     const purchase = createPurchase({
@@ -217,6 +268,7 @@ export function buyForTeam(opts: {
       pricePaid,
       country: opts.country,
     });
+    if (promo) incrementPromoRedemption(promo.id);
 
     // Resolve or create the buyer's team within the transaction.
     let team = getTeamForAdmin(opts.userId);

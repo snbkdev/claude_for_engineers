@@ -433,3 +433,26 @@ export const courseRatings = sqliteTable("course_ratings", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export enum PromoDiscountType {
+  Percent = "percent",
+  Fixed = "fixed",
+}
+
+// Marketing promo codes — a global discount applied at checkout, distinct from
+// the team seat `coupons`. A code is `percent` (1–100) or `fixed` (cents off),
+// with an optional expiry and redemption limit. `redemptionCount` is the
+// enforced usage counter (incremented inside the purchase transaction).
+export const promoCodes = sqliteTable("promo_codes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  code: text("code").notNull().unique(), // stored uppercase
+  discountType: text("discount_type").notNull().$type<PromoDiscountType>(),
+  discountValue: integer("discount_value").notNull(), // percent or cents
+  maxRedemptions: integer("max_redemptions"), // null = unlimited
+  redemptionCount: integer("redemption_count").notNull().default(0),
+  expiresAt: text("expires_at"), // ISO, null = never
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});

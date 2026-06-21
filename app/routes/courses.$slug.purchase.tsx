@@ -31,6 +31,7 @@ import { formatDuration, formatPrice } from "~/lib/utils";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice, getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { buyForSelf, buyForTeam } from "~/services/transactionService";
+import { validatePromo, computeDiscountedPrice } from "~/services/promoService";
 import { parseFormData, parseParams } from "~/lib/validation";
 
 const purchaseParamsSchema = v.object({
@@ -38,7 +39,10 @@ const purchaseParamsSchema = v.object({
 });
 
 const purchaseActionSchema = v.variant("intent", [
-  v.object({ intent: v.literal("confirm-purchase") }),
+  v.object({
+    intent: v.literal("confirm-purchase"),
+    promoCode: v.optional(v.string()),
+  }),
   v.object({
     intent: v.literal("confirm-team-purchase"),
     quantity: v.pipe(
@@ -47,6 +51,7 @@ const purchaseActionSchema = v.variant("intent", [
       v.integer(),
       v.minValue(1)
     ),
+    promoCode: v.optional(v.string()),
   }),
 ]);
 
@@ -117,16 +122,44 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ? (COUNTRIES.find((c) => c.code === country)?.name ?? country)
     : null;
 
+  // Optional promo code from the query (?promo=). Validated server-side so the
+  // shown price is authoritative; the action re-validates on confirm.
+  const promoInput = url.searchParams.get("promo") ?? "";
+  let appliedPromo: {
+    code: string;
+    discountType: string;
+    discountValue: number;
+  } | null = null;
+  let promoError: string | null = null;
+  let finalPrice = pppPrice;
+  if (promoInput.trim()) {
+    const result = validatePromo({ code: promoInput });
+    if (result.ok) {
+      appliedPromo = {
+        code: result.promo.code,
+        discountType: result.promo.discountType,
+        discountValue: result.promo.discountValue,
+      };
+      finalPrice = computeDiscountedPrice(pppPrice, result.promo);
+    } else {
+      promoError = result.error;
+    }
+  }
+
   return {
     course: courseWithDetails,
     lessonCount,
     enrollmentCount,
     totalDuration,
     pppPrice,
+    finalPrice,
     tierInfo,
     country,
     countryName,
     isEnrolled: enrolled,
+    promoInput,
+    appliedPromo,
+    promoError,
   };
 }
 
@@ -153,7 +186,12 @@ export async function action({ params, request }: Route.ActionArgs) {
   const country = await resolveCountry(request);
 
   if (parsed.data.intent === "confirm-purchase") {
-    const result = buyForSelf({ userId: currentUserId, course, country });
+    const result = buyForSelf({
+      userId: currentUserId,
+      course,
+      country,
+      promoCode: parsed.data.promoCode,
+    });
     if (!result.ok) {
       return data({ error: result.error }, { status: 400 });
     }
@@ -166,6 +204,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     course,
     country,
     quantity: parsed.data.quantity,
+    promoCode: parsed.data.promoCode,
   });
   if (!result.ok) {
     return data({ error: result.error }, { status: 400 });
@@ -182,15 +221,19 @@ export default function PurchaseConfirmation({
     enrollmentCount,
     totalDuration,
     pppPrice,
+    finalPrice,
     tierInfo,
     countryName,
     isEnrolled,
+    promoInput,
+    appliedPromo,
+    promoError,
   } = loaderData;
   const fetcher = useFetcher();
   const isSubmitting = fetcher.state !== "idle";
   const [searchParams] = useSearchParams();
-  const defaultMode =
-    isEnrolled || searchParams.get("mode") === "team" ? "team" : "self";
+  const mode = searchParams.get("mode");
+  const defaultMode = isEnrolled || mode === "team" ? "team" : "self";
   const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
@@ -199,8 +242,10 @@ export default function PurchaseConfirmation({
     }
   }, [fetcher.state, fetcher.data]);
 
-  const isDiscounted = pppPrice < course.price;
-  const teamTotal = pppPrice * quantity;
+  const isPppDiscounted = pppPrice < course.price;
+  const isDiscounted = finalPrice < course.price;
+  const appliedCode = appliedPromo?.code ?? "";
+  const teamTotal = finalPrice * quantity;
 
   return (
     <div className="mx-auto max-w-3xl p-6 lg:p-8">
@@ -267,13 +312,47 @@ export default function PurchaseConfirmation({
 
           {/* Purchase tabs */}
           <div className="mt-6 border-t pt-6">
-            {isDiscounted && countryName && (
+            {isPppDiscounted && countryName && (
               <div className="mb-4 rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
                 <p className="text-sm text-green-800 dark:text-green-300">
                   PPP discount applied for {countryName} — {tierInfo.label}
                 </p>
               </div>
             )}
+
+            {/* Promo code (GET form sets ?promo=, loader validates). */}
+            <form method="get" className="mb-4">
+              {mode && <input type="hidden" name="mode" value={mode} />}
+              <label className="mb-1.5 block text-sm font-medium">
+                Promo code
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  name="promo"
+                  defaultValue={promoInput}
+                  placeholder="Enter a code"
+                  className="flex-1 rounded-md border bg-background px-3 py-2 text-sm uppercase placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button type="submit" variant="outline">
+                  Apply
+                </Button>
+              </div>
+              {appliedPromo && (
+                <p className="mt-2 text-sm text-green-700 dark:text-green-400">
+                  Code{" "}
+                  <span className="font-semibold">{appliedPromo.code}</span>{" "}
+                  applied —{" "}
+                  {appliedPromo.discountType === "percent"
+                    ? `${appliedPromo.discountValue}% off`
+                    : `${formatPrice(appliedPromo.discountValue)} off`}
+                  .
+                </p>
+              )}
+              {promoError && (
+                <p className="mt-2 text-sm text-destructive">{promoError}</p>
+              )}
+            </form>
 
             <Tabs defaultValue={defaultMode}>
               {!isEnrolled && (
@@ -305,7 +384,7 @@ export default function PurchaseConfirmation({
                               Your price
                             </span>
                             <div className="text-3xl font-bold">
-                              {formatPrice(pppPrice)}
+                              {formatPrice(finalPrice)}
                             </div>
                           </>
                         ) : (
@@ -314,7 +393,7 @@ export default function PurchaseConfirmation({
                               Total
                             </span>
                             <div className="text-3xl font-bold">
-                              {formatPrice(pppPrice)}
+                              {formatPrice(finalPrice)}
                             </div>
                           </>
                         )}
@@ -328,6 +407,11 @@ export default function PurchaseConfirmation({
                             type="hidden"
                             name="intent"
                             value="confirm-purchase"
+                          />
+                          <input
+                            type="hidden"
+                            name="promoCode"
+                            value={appliedCode}
                           />
                           <Button size="lg" disabled={isSubmitting}>
                             {isSubmitting
@@ -373,7 +457,7 @@ export default function PurchaseConfirmation({
                     {/* Price breakdown */}
                     <div>
                       <div className="text-sm text-muted-foreground">
-                        {formatPrice(pppPrice)} &times; {quantity}{" "}
+                        {formatPrice(finalPrice)} &times; {quantity}{" "}
                         {quantity === 1 ? "seat" : "seats"}
                       </div>
                       <div className="text-3xl font-bold">
@@ -399,6 +483,11 @@ export default function PurchaseConfirmation({
                           value="confirm-team-purchase"
                         />
                         <input type="hidden" name="quantity" value={quantity} />
+                        <input
+                          type="hidden"
+                          name="promoCode"
+                          value={appliedCode}
+                        />
                         <Button size="lg" disabled={isSubmitting}>
                           {isSubmitting
                             ? "Processing..."
