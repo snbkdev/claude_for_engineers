@@ -62,3 +62,16 @@ export function updateUserRole(id: number, role: UserRole) {
     .returning()
     .get();
 }
+
+// Toggle whether the user appears on the public leaderboard.
+export function setLeaderboardOptOut(opts: {
+  userId: number;
+  optOut: boolean;
+}) {
+  return db
+    .update(users)
+    .set({ leaderboardOptOut: opts.optOut })
+    .where(eq(users.id, opts.userId))
+    .returning()
+    .get();
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `leaderboard_opt_out` integer DEFAULT false NOT NULL;

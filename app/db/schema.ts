@@ -51,6 +51,11 @@ export const users = sqliteTable("users", {
   role: text("role").notNull().$type<UserRole>(),
   avatarUrl: text("avatar_url"),
   bio: text("bio"),
+  // When true the user is hidden from the public leaderboard (and doesn't see
+  // their own rank). Opt-out privacy, default visible.
+  leaderboardOptOut: integer("leaderboard_opt_out", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

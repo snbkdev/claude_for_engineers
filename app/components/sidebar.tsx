@@ -21,6 +21,7 @@ import {
   LogOut,
   Settings,
   NotebookPen,
+  Trophy,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -66,6 +67,12 @@ const navItems: NavItem[] = [
     label: "Dashboard",
     to: "/dashboard",
     icon: <LayoutDashboard className="size-4" />,
+    roles: [UserRole.Student],
+  },
+  {
+    label: "Leaderboard",
+    to: "/leaderboard",
+    icon: <Trophy className="size-4" />,
     roles: [UserRole.Student],
   },
   {
