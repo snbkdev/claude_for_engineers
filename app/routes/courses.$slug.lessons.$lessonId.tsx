@@ -43,6 +43,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Circle,
   Clock,
   Github,
@@ -73,6 +74,9 @@ import {
   createComment,
   deleteComment,
   getCommentById,
+  getCommentScores,
+  getUserVotes,
+  voteOnComment,
 } from "~/services/commentService";
 import { UserAvatar } from "~/components/user-avatar";
 import { Textarea } from "~/components/ui/textarea";
@@ -273,9 +277,29 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     !!findPurchase({ userId: currentUserId, courseId: course.id });
   const canComment = isInstructor || hasPurchased;
 
-  const comments = canComment
-    ? buildCommentTree(getCommentsForLesson(lessonId))
-    : [];
+  // Enrich each comment with its vote score and the current user's own vote,
+  // then build the thread tree and flag answered questions (a question with at
+  // least one instructor reply).
+  let comments: CommentNode[] = [];
+  if (canComment) {
+    const rawComments = getCommentsForLesson(lessonId);
+    const commentIds = rawComments.map((c) => c.id);
+    const scores = getCommentScores(commentIds);
+    const myVotes = currentUserId
+      ? getUserVotes({ userId: currentUserId, commentIds })
+      : new Map<number, number>();
+    const enriched = rawComments.map((c) => ({
+      ...c,
+      score: scores.get(c.id) ?? 0,
+      myVote: myVotes.get(c.id) ?? 0,
+    }));
+    comments = buildCommentTree(enriched).map((node) => ({
+      ...node,
+      answeredByInstructor: node.replies.some(
+        (r) => r.userRole === UserRole.Instructor
+      ),
+    }));
+  }
 
   // Private notes — visible to whoever can access the lesson (owner or teacher).
   const notes =
@@ -497,7 +521,43 @@ export async function action({ params, request }: Route.ActionArgs) {
       return { commentError: "Comment cannot be empty" };
     }
 
-    createComment({ userId: currentUserId, lessonId, content, parentId });
+    const isQuestion = formData.get("isQuestion") === "on";
+    createComment({
+      userId: currentUserId,
+      lessonId,
+      content,
+      parentId,
+      isQuestion,
+    });
+    return { commentSuccess: true };
+  }
+
+  if (intent === "vote-comment") {
+    const isInstructor = course.instructorId === currentUserId;
+    const hasPurchased = !!findPurchase({
+      userId: currentUserId,
+      courseId: course.id,
+    });
+    if (!isInstructor && !hasPurchased) {
+      throw data("You must own this course to vote", { status: 403 });
+    }
+
+    const commentId = Number(formData.get("commentId"));
+    const direction = Number(formData.get("value"));
+    if (isNaN(commentId) || (direction !== 1 && direction !== -1)) {
+      throw data("Invalid vote", { status: 400 });
+    }
+
+    const comment = getCommentById(commentId);
+    if (!comment || comment.lessonId !== lessonId) {
+      throw data("Comment not found", { status: 404 });
+    }
+    // You can't vote on your own comment.
+    if (comment.userId === currentUserId) {
+      return { commentError: "You can't vote on your own comment" };
+    }
+
+    voteOnComment({ commentId, userId: currentUserId, value: direction });
     return { commentSuccess: true };
   }
 
@@ -1672,12 +1732,18 @@ type CommentData = {
   userId: number;
   parentId: number | null;
   content: string;
+  isQuestion: boolean;
   createdAt: string;
   userName: string;
   userAvatarUrl: string | null;
   userRole: string;
+  score: number;
+  myVote: number;
 };
-type CommentNode = CommentData & { replies: CommentData[] };
+type CommentNode = CommentData & {
+  replies: CommentData[];
+  answeredByInstructor: boolean;
+};
 
 function CommentsSection({
   comments,
@@ -1709,6 +1775,26 @@ function CommentsSection({
   const isPosting = fetcher.state !== "idle";
   const totalCount = comments.reduce((sum, c) => sum + 1 + c.replies.length, 0);
 
+  const [sort, setSort] = useState<"newest" | "helpful">("newest");
+  const [filter, setFilter] = useState<"all" | "questions" | "unanswered">(
+    "all"
+  );
+
+  const visible = comments
+    .filter((c) => {
+      if (filter === "questions") return c.isQuestion;
+      if (filter === "unanswered")
+        return c.isQuestion && !c.answeredByInstructor;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sort === "helpful") return b.score - a.score;
+      // "newest" — most recent first (createdAt is ISO and sortable).
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+
+  const questionCount = comments.filter((c) => c.isQuestion).length;
+
   return (
     <section className="mb-8 border-t pt-8">
       <div className="mb-6 flex items-center gap-2">
@@ -1726,18 +1812,84 @@ function CommentsSection({
           rows={3}
           className="mb-3"
         />
-        <Button type="submit" disabled={isPosting}>
-          {isPosting ? "Posting..." : "Post comment"}
-        </Button>
+        <div className="flex items-center justify-between gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              name="isQuestion"
+              className="size-4 accent-primary"
+            />
+            Post as a question
+          </label>
+          <Button type="submit" disabled={isPosting}>
+            {isPosting ? "Posting..." : "Post comment"}
+          </Button>
+        </div>
       </fetcher.Form>
+
+      {/* Sort + Q&A filters */}
+      {comments.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+          <div className="inline-flex rounded-lg border p-0.5">
+            {(
+              [
+                { v: "newest", label: "Newest" },
+                { v: "helpful", label: "Most helpful" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.v}
+                type="button"
+                onClick={() => setSort(opt.v)}
+                className={cn(
+                  "rounded-md px-3 py-1 font-medium transition-colors",
+                  sort === opt.v
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex rounded-lg border p-0.5">
+            {(
+              [
+                { v: "all", label: "All" },
+                { v: "questions", label: "Questions" },
+                { v: "unanswered", label: "Unanswered" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.v}
+                type="button"
+                onClick={() => setFilter(opt.v)}
+                disabled={opt.v !== "all" && questionCount === 0}
+                className={cn(
+                  "rounded-md px-3 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                  filter === opt.v
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No comments yet. Be the first to start the discussion.
         </p>
+      ) : visible.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No comments match this filter.
+        </p>
       ) : (
         <ul className="space-y-6">
-          {comments.map((comment) => (
+          {visible.map((comment) => (
             <CommentItem
               key={comment.id}
               comment={comment}
@@ -1775,7 +1927,11 @@ function CommentItem({
 
   return (
     <li>
-      <CommentBody comment={comment} currentUserId={currentUserId} />
+      <CommentBody
+        comment={comment}
+        currentUserId={currentUserId}
+        answered={comment.answeredByInstructor}
+      />
 
       {/* Only the instructor can reply to a comment */}
       {isInstructor && (
@@ -1838,14 +1994,28 @@ function CommentItem({
 function CommentBody({
   comment,
   currentUserId,
+  answered = false,
 }: {
   comment: CommentData;
   currentUserId: number | null;
+  answered?: boolean;
 }) {
   const deleteFetcher = useFetcher();
+  const voteFetcher = useFetcher();
   const canDelete = comment.userId === currentUserId;
   const isAuthorInstructor = comment.userRole === UserRole.Instructor;
   const isDeleting = deleteFetcher.state !== "idle";
+  const canVote = currentUserId != null && comment.userId !== currentUserId;
+
+  // Optimistic vote: reflect the in-flight direction immediately.
+  const pendingValue = voteFetcher.formData?.get("value");
+  const myVote =
+    pendingValue != null
+      ? comment.myVote === Number(pendingValue)
+        ? 0 // re-clicking the same direction removes it
+        : Number(pendingValue)
+      : comment.myVote;
+  const score = comment.score - comment.myVote + myVote;
 
   return (
     <div className={cn("flex gap-3", isDeleting && "opacity-50")}>
@@ -1855,11 +2025,23 @@ function CommentBody({
         className="size-8 shrink-0"
       />
       <div className="flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{comment.userName}</span>
           {isAuthorInstructor && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               Instructor
+            </span>
+          )}
+          {comment.isQuestion && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+              <HelpCircle className="size-3" />
+              Question
+            </span>
+          )}
+          {answered && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-300">
+              <CheckCircle2 className="size-3" />
+              Answered
             </span>
           )}
           <span className="text-xs text-muted-foreground">
@@ -1883,6 +2065,58 @@ function CommentBody({
         <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/90">
           {comment.content}
         </p>
+
+        {/* Up/down votes */}
+        <div className="mt-2 flex items-center gap-1">
+          <voteFetcher.Form method="post" className="contents">
+            <input type="hidden" name="intent" value="vote-comment" />
+            <input type="hidden" name="commentId" value={comment.id} />
+            <button
+              type="submit"
+              name="value"
+              value="1"
+              disabled={!canVote}
+              title={canVote ? "Helpful" : "You can't vote on this"}
+              className={cn(
+                "rounded p-1 transition-colors disabled:opacity-40",
+                myVote === 1
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+                canVote && "cursor-pointer"
+              )}
+            >
+              <ChevronUp className="size-4" />
+            </button>
+            <span
+              className={cn(
+                "min-w-5 text-center text-sm font-medium tabular-nums",
+                score > 0
+                  ? "text-primary"
+                  : score < 0
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+              )}
+            >
+              {score}
+            </span>
+            <button
+              type="submit"
+              name="value"
+              value="-1"
+              disabled={!canVote}
+              title={canVote ? "Not helpful" : "You can't vote on this"}
+              className={cn(
+                "rounded p-1 transition-colors disabled:opacity-40",
+                myVote === -1
+                  ? "text-destructive"
+                  : "text-muted-foreground hover:text-foreground",
+                canVote && "cursor-pointer"
+              )}
+            >
+              <ChevronDown className="size-4" />
+            </button>
+          </voteFetcher.Form>
+        </div>
       </div>
     </div>
   );

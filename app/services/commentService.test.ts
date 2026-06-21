@@ -17,6 +17,9 @@ import {
   createComment,
   deleteComment,
   buildCommentTree,
+  voteOnComment,
+  getCommentScores,
+  getUserVotes,
 } from "./commentService";
 
 function seedLesson() {
@@ -42,7 +45,12 @@ describe("commentService", () => {
   describe("createComment", () => {
     it("creates a top-level comment", () => {
       const lesson = seedLesson();
-      const comment = createComment({ userId: base.user.id, lessonId: lesson.id, content: "Great lesson!", parentId: null });
+      const comment = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Great lesson!",
+        parentId: null,
+      });
 
       expect(comment.id).toBeDefined();
       expect(comment.parentId).toBeNull();
@@ -51,18 +59,38 @@ describe("commentService", () => {
 
     it("trims whitespace and rejects empty content", () => {
       const lesson = seedLesson();
-      const comment = createComment({ userId: base.user.id, lessonId: lesson.id, content: "  hi  ", parentId: null });
+      const comment = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "  hi  ",
+        parentId: null,
+      });
       expect(comment.content).toBe("hi");
 
       expect(() =>
-        createComment({ userId: base.user.id, lessonId: lesson.id, content: "   ", parentId: null })
+        createComment({
+          userId: base.user.id,
+          lessonId: lesson.id,
+          content: "   ",
+          parentId: null,
+        })
       ).toThrow();
     });
 
     it("creates a reply attached to a top-level comment", () => {
       const lesson = seedLesson();
-      const parent = createComment({ userId: base.user.id, lessonId: lesson.id, content: "Question?", parentId: null });
-      const reply = createComment({ userId: base.instructor.id, lessonId: lesson.id, content: "Answer.", parentId: parent.id });
+      const parent = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Question?",
+        parentId: null,
+      });
+      const reply = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Answer.",
+        parentId: parent.id,
+      });
 
       expect(reply.parentId).toBe(parent.id);
     });
@@ -70,20 +98,45 @@ describe("commentService", () => {
     it("rejects a reply to a comment on a different lesson", () => {
       const lessonA = seedLesson();
       const lessonB = seedLesson();
-      const parent = createComment({ userId: base.user.id, lessonId: lessonA.id, content: "On A", parentId: null });
+      const parent = createComment({
+        userId: base.user.id,
+        lessonId: lessonA.id,
+        content: "On A",
+        parentId: null,
+      });
 
       expect(() =>
-        createComment({ userId: base.instructor.id, lessonId: lessonB.id, content: "Wrong lesson", parentId: parent.id })
+        createComment({
+          userId: base.instructor.id,
+          lessonId: lessonB.id,
+          content: "Wrong lesson",
+          parentId: parent.id,
+        })
       ).toThrow();
     });
 
     it("rejects replying to a reply", () => {
       const lesson = seedLesson();
-      const parent = createComment({ userId: base.user.id, lessonId: lesson.id, content: "Question?", parentId: null });
-      const reply = createComment({ userId: base.instructor.id, lessonId: lesson.id, content: "Answer.", parentId: parent.id });
+      const parent = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Question?",
+        parentId: null,
+      });
+      const reply = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Answer.",
+        parentId: parent.id,
+      });
 
       expect(() =>
-        createComment({ userId: base.user.id, lessonId: lesson.id, content: "Thanks!", parentId: reply.id })
+        createComment({
+          userId: base.user.id,
+          lessonId: lesson.id,
+          content: "Thanks!",
+          parentId: reply.id,
+        })
       ).toThrow();
     });
   });
@@ -91,8 +144,18 @@ describe("commentService", () => {
   describe("getCommentsForLesson", () => {
     it("returns comments joined with author details, oldest first", () => {
       const lesson = seedLesson();
-      createComment({ userId: base.user.id, lessonId: lesson.id, content: "First", parentId: null });
-      createComment({ userId: base.instructor.id, lessonId: lesson.id, content: "Second", parentId: null });
+      createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "First",
+        parentId: null,
+      });
+      createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Second",
+        parentId: null,
+      });
 
       const rows = getCommentsForLesson(lesson.id);
       expect(rows).toHaveLength(2);
@@ -104,7 +167,12 @@ describe("commentService", () => {
     it("only returns comments for the requested lesson", () => {
       const lessonA = seedLesson();
       const lessonB = seedLesson();
-      createComment({ userId: base.user.id, lessonId: lessonA.id, content: "On A", parentId: null });
+      createComment({
+        userId: base.user.id,
+        lessonId: lessonA.id,
+        content: "On A",
+        parentId: null,
+      });
 
       expect(getCommentsForLesson(lessonB.id)).toHaveLength(0);
     });
@@ -113,9 +181,24 @@ describe("commentService", () => {
   describe("buildCommentTree", () => {
     it("nests replies under their parent comment", () => {
       const lesson = seedLesson();
-      const parent = createComment({ userId: base.user.id, lessonId: lesson.id, content: "Question?", parentId: null });
-      createComment({ userId: base.instructor.id, lessonId: lesson.id, content: "Answer.", parentId: parent.id });
-      createComment({ userId: base.user.id, lessonId: lesson.id, content: "Another top-level", parentId: null });
+      const parent = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Question?",
+        parentId: null,
+      });
+      createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Answer.",
+        parentId: parent.id,
+      });
+      createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Another top-level",
+        parentId: null,
+      });
 
       const tree = buildCommentTree(getCommentsForLesson(lesson.id));
       expect(tree).toHaveLength(2);
@@ -128,13 +211,140 @@ describe("commentService", () => {
   describe("deleteComment", () => {
     it("deletes a comment and cascades to its replies", () => {
       const lesson = seedLesson();
-      const parent = createComment({ userId: base.user.id, lessonId: lesson.id, content: "Question?", parentId: null });
-      const reply = createComment({ userId: base.instructor.id, lessonId: lesson.id, content: "Answer.", parentId: parent.id });
+      const parent = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Question?",
+        parentId: null,
+      });
+      const reply = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Answer.",
+        parentId: parent.id,
+      });
 
       deleteComment(parent.id);
 
       expect(getCommentById(parent.id)).toBeUndefined();
       expect(getCommentById(reply.id)).toBeUndefined();
+    });
+
+    it("removes reactions on the comment and its replies", () => {
+      const lesson = seedLesson();
+      const parent = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Q?",
+        parentId: null,
+      });
+      const reply = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "A.",
+        parentId: parent.id,
+      });
+      voteOnComment({
+        commentId: parent.id,
+        userId: base.instructor.id,
+        value: 1,
+      });
+      voteOnComment({ commentId: reply.id, userId: base.user.id, value: 1 });
+
+      deleteComment(parent.id);
+
+      const remaining = testDb.select().from(schema.commentReactions).all();
+      expect(remaining).toHaveLength(0);
+    });
+  });
+
+  describe("questions (Q&A)", () => {
+    it("stores isQuestion for top-level comments and ignores it for replies", () => {
+      const lesson = seedLesson();
+      const q = createComment({
+        userId: base.user.id,
+        lessonId: lesson.id,
+        content: "Why?",
+        parentId: null,
+        isQuestion: true,
+      });
+      expect(q.isQuestion).toBe(true);
+
+      const reply = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Because.",
+        parentId: q.id,
+        isQuestion: true, // forced false for replies
+      });
+      expect(reply.isQuestion).toBe(false);
+
+      const rows = getCommentsForLesson(lesson.id);
+      expect(rows.find((r) => r.id === q.id)!.isQuestion).toBe(true);
+    });
+  });
+
+  describe("voteOnComment", () => {
+    it("adds, toggles off, and switches a vote; aggregates score", () => {
+      const lesson = seedLesson();
+      const c = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Helpful tip",
+        parentId: null,
+      });
+
+      // Up-vote from the student.
+      expect(
+        voteOnComment({ commentId: c.id, userId: base.user.id, value: 1 })
+      ).toBe(1);
+      expect(getCommentScores([c.id]).get(c.id)).toBe(1);
+
+      // Re-clicking up removes it.
+      expect(
+        voteOnComment({ commentId: c.id, userId: base.user.id, value: 1 })
+      ).toBe(0);
+      expect(getCommentScores([c.id]).get(c.id) ?? 0).toBe(0);
+
+      // Down-vote, then switch to up.
+      expect(
+        voteOnComment({ commentId: c.id, userId: base.user.id, value: -1 })
+      ).toBe(-1);
+      expect(getCommentScores([c.id]).get(c.id)).toBe(-1);
+      expect(
+        voteOnComment({ commentId: c.id, userId: base.user.id, value: 1 })
+      ).toBe(1);
+      expect(getCommentScores([c.id]).get(c.id)).toBe(1);
+    });
+
+    it("sums votes from multiple users and reports the user's own vote", () => {
+      const lesson = seedLesson();
+      const c = createComment({
+        userId: base.instructor.id,
+        lessonId: lesson.id,
+        content: "Tip",
+        parentId: null,
+      });
+      const other = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other",
+          email: "other@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+
+      voteOnComment({ commentId: c.id, userId: base.user.id, value: 1 });
+      voteOnComment({ commentId: c.id, userId: other.id, value: -1 });
+
+      expect(getCommentScores([c.id]).get(c.id)).toBe(0);
+      expect(
+        getUserVotes({ userId: base.user.id, commentIds: [c.id] }).get(c.id)
+      ).toBe(1);
+      expect(
+        getUserVotes({ userId: other.id, commentIds: [c.id] }).get(c.id)
+      ).toBe(-1);
     });
   });
 });

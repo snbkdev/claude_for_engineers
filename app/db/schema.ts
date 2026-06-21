@@ -287,10 +287,32 @@ export const lessonComments = sqliteTable("lesson_comments", {
     (): AnySQLiteColumn => lessonComments.id
   ),
   content: text("content").notNull(),
+  // Top-level comments may be flagged as questions for the Q&A view (filter +
+  // "answered by instructor" badge). Replies are never questions.
+  isQuestion: integer("is_question", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+// Up/down votes on lesson comments (one per user per comment, value +1 or −1).
+// Drives the "most helpful" sort. Uniqueness per (commentId, userId) is enforced
+// in the service via check-then-update (no composite constraint).
+export const commentReactions = sqliteTable("comment_reactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  commentId: integer("comment_id")
+    .notNull()
+    .references(() => lessonComments.id),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  value: integer("value").notNull(), // +1 (up) or −1 (down)
+  createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
