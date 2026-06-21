@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   computeXp,
   levelFromXp,
+  longestDailyStreak,
   XP_PER_LESSON,
   XP_PER_COURSE,
   XP_PER_LEVEL,
@@ -50,5 +51,50 @@ describe("levelFromXp", () => {
 
   it("clamps negative XP to level 1", () => {
     expect(levelFromXp(-100).level).toBe(1);
+  });
+});
+
+describe("longestDailyStreak", () => {
+  it("is zero with no timestamps", () => {
+    expect(longestDailyStreak([])).toBe(0);
+    expect(longestDailyStreak([null, null])).toBe(0);
+  });
+
+  it("counts a single active day as 1", () => {
+    expect(longestDailyStreak(["2026-06-01T10:00:00.000Z"])).toBe(1);
+  });
+
+  it("dedupes multiple activities on the same day", () => {
+    expect(
+      longestDailyStreak([
+        "2026-06-01T08:00:00.000Z",
+        "2026-06-01T20:00:00.000Z",
+      ])
+    ).toBe(1);
+  });
+
+  it("finds the longest run of consecutive days, ignoring gaps", () => {
+    const dates = [
+      "2026-06-01T10:00:00.000Z",
+      "2026-06-02T10:00:00.000Z",
+      "2026-06-03T10:00:00.000Z",
+      // gap on the 4th
+      "2026-06-05T10:00:00.000Z",
+      "2026-06-06T10:00:00.000Z",
+    ];
+    expect(longestDailyStreak(dates)).toBe(3);
+  });
+
+  it("detects a 7-day run regardless of input order", () => {
+    const days = [6, 0, 2, 4, 1, 5, 3].map(
+      (d) => `2026-06-0${d + 1}T12:00:00.000Z`
+    );
+    expect(longestDailyStreak(days)).toBe(7);
+  });
+
+  it("skips unparseable timestamps", () => {
+    expect(longestDailyStreak(["not-a-date", "2026-06-01T10:00:00.000Z"])).toBe(
+      1
+    );
   });
 });

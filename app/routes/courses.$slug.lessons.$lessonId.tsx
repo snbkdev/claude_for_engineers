@@ -32,6 +32,7 @@ import {
   MAX_QUIZ_ATTEMPTS,
 } from "~/services/quizScoringService";
 import { maybeCompleteCourse } from "~/services/certificateService";
+import { evaluateAchievements } from "~/services/achievementService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -285,6 +286,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   // Lesson attachments/resources (not sensitive — shown to any viewer).
   const resources = getResourcesForLesson(lessonId);
 
+  // Achievements: award any badge newly unlocked by the latest progress (e.g.
+  // completing this lesson or passing its quiz). Idempotent; `newAchievements`
+  // is non-empty only on the transition, driving an unlock toast.
+  const newAchievements =
+    enrolled && currentUserId
+      ? evaluateAchievements({ userId: currentUserId })
+      : [];
+
   // Render lesson content from Markdown to HTML server-side
   const contentHtml = lesson.content
     ? await renderMarkdown(lesson.content)
@@ -393,6 +402,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     bookmarkedLessonIds,
     notes,
     resources,
+    newAchievements,
   };
 }
 
@@ -640,6 +650,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     bookmarkedLessonIds,
     notes,
     resources,
+    newAchievements,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
@@ -661,6 +672,15 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
       navigate(`/courses/${course.slug}/lessons/${nextLesson.id}`);
     }
   }, [justCompleted, nextLesson, course.slug, navigate]);
+
+  // Celebrate any badge unlocked by completing this lesson / passing its quiz.
+  useEffect(() => {
+    for (const a of newAchievements) {
+      toast.success(`Achievement unlocked: ${a.title}`, {
+        description: a.description,
+      });
+    }
+  }, [newAchievements]);
 
   const quizResult = quizFetcher.data?.quizResult ?? null;
   const quizError = quizFetcher.data?.quizError ?? null;

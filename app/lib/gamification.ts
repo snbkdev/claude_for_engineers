@@ -35,6 +35,42 @@ export interface LevelInfo {
   progressPct: number;
 }
 
+/**
+ * Longest run of consecutive calendar days (UTC) present in a list of ISO
+ * timestamps. Days are deduped, so several activities on one day count once.
+ * Used to award the "learn N days in a row" achievement; because it measures
+ * the *longest* historical run (not the current streak), the badge is earned
+ * the first time the evaluator sees a 7-day run and never lost afterwards.
+ */
+export function longestDailyStreak(
+  isoTimestamps: Array<string | null>
+): number {
+  const days = new Set<string>();
+  for (const ts of isoTimestamps) {
+    if (!ts) continue;
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) continue;
+    days.add(d.toISOString().slice(0, 10)); // YYYY-MM-DD (UTC)
+  }
+  if (days.size === 0) return 0;
+
+  const sorted = [...days].sort();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  let longest = 1;
+  let run = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = Date.parse(sorted[i - 1]);
+    const curr = Date.parse(sorted[i]);
+    if (curr - prev === DAY_MS) {
+      run += 1;
+      if (run > longest) longest = run;
+    } else {
+      run = 1;
+    }
+  }
+  return longest;
+}
+
 /** Map a total XP figure to a level and progress within that level. */
 export function levelFromXp(totalXp: number): LevelInfo {
   const xp = Math.max(0, Math.floor(totalXp));

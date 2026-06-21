@@ -339,6 +339,22 @@ export const lessonResources = sqliteTable("lesson_resources", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Earned achievements/badges. Each row records that a user has unlocked the
+// achievement identified by `key`; the catalog of definitions (title,
+// description, icon, unlock rule) lives in code (achievementService), so adding
+// a new badge needs no migration. One row per (userId, key) — uniqueness is
+// enforced in the service via check-then-insert (no composite constraint).
+export const achievements = sqliteTable("achievements", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  key: text("key").notNull(),
+  earnedAt: text("earned_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 // In-app notifications. Generic by design (type/title/message/linkUrl) so new
 // event kinds can be added without touching the schema. Currently only
 // enrollment notifications are produced, delivered to instructors.

@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { Link } from "react-router";
+import { toast } from "sonner";
 import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
 import {
@@ -10,6 +12,10 @@ import {
 import { getCurrentUserId } from "~/lib/session";
 import { getUsersByRole } from "~/services/userService";
 import { getUserCertificates } from "~/services/certificateService";
+import {
+  evaluateAchievements,
+  getAchievementShowcase,
+} from "~/services/achievementService";
 import { UserRole } from "~/db/schema";
 import { computeXp, levelFromXp } from "~/lib/gamification";
 import {
@@ -25,12 +31,20 @@ import {
   Award,
   BookOpen,
   CheckCircle2,
+  Crown,
+  Flame,
+  Footprints,
   GraduationCap,
+  Library,
+  Lock,
   PlayCircle,
   Sparkles,
+  Target,
   Trophy,
+  type LucideIcon,
 } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
+import { cn } from "~/lib/utils";
 import { data, isRouteErrorResponse } from "react-router";
 
 export function meta() {
@@ -105,7 +119,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     .slice(0, 5)
     .map((u) => ({ id: u.id, name: u.name, avatarUrl: u.avatarUrl }));
 
-  return { inProgressCourses, completedCourses, level, otherLearners };
+  // Achievements: award any newly-unlocked badge (idempotent) and load the
+  // full showcase. `newAchievements` drives the unlock toast.
+  const newAchievements = evaluateAchievements({ userId: currentUserId });
+  const achievementShowcase = getAchievementShowcase(currentUserId);
+
+  return {
+    inProgressCourses,
+    completedCourses,
+    level,
+    otherLearners,
+    newAchievements,
+    achievementShowcase,
+  };
 }
 
 // Stable colored banner per course (matching the dashboard reference UI).
@@ -196,6 +222,87 @@ function LevelHeader({
   );
 }
 
+const ACHIEVEMENT_ICONS: Record<string, LucideIcon> = {
+  Footprints,
+  GraduationCap,
+  Library,
+  Target,
+  Crown,
+  Flame,
+};
+
+type ShowcaseEntry = {
+  key: string;
+  title: string;
+  description: string;
+  icon: string;
+  earned: boolean;
+  earnedAt: string | null;
+};
+
+function AchievementsShowcase({
+  achievements,
+}: {
+  achievements: ShowcaseEntry[];
+}) {
+  const earnedCount = achievements.filter((a) => a.earned).length;
+
+  return (
+    <Card className="mb-8">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <Award className="size-5 text-violet-500" />
+          <h2 className="text-lg font-semibold">Achievements</h2>
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {earnedCount} / {achievements.length} unlocked
+        </span>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          {achievements.map((a) => {
+            const Icon = ACHIEVEMENT_ICONS[a.icon] ?? Award;
+            return (
+              <div
+                key={a.key}
+                title={a.description}
+                className={cn(
+                  "flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors",
+                  a.earned
+                    ? "border-violet-200 bg-violet-50 dark:border-violet-900 dark:bg-violet-950/40"
+                    : "border-dashed bg-muted/30 opacity-70"
+                )}
+              >
+                <div
+                  className={cn(
+                    "relative flex size-12 items-center justify-center rounded-full",
+                    a.earned
+                      ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  <Icon className="size-6" />
+                  {!a.earned && (
+                    <span className="absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full border bg-background">
+                      <Lock className="size-3 text-muted-foreground" />
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-medium leading-tight">{a.title}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {a.description}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DashboardCardSkeleton() {
   return (
     <Card className="flex flex-col">
@@ -226,6 +333,7 @@ export function HydrateFallback() {
         <Skeleton className="mt-2 h-5 w-64" />
       </div>
       <Skeleton className="mb-8 h-28 w-full rounded-xl" />
+      <Skeleton className="mb-8 h-44 w-full rounded-xl" />
       <Skeleton className="mb-4 h-6 w-32" />
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -237,9 +345,24 @@ export function HydrateFallback() {
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { inProgressCourses, completedCourses, level, otherLearners } =
-    loaderData;
+  const {
+    inProgressCourses,
+    completedCourses,
+    level,
+    otherLearners,
+    newAchievements,
+    achievementShowcase,
+  } = loaderData;
   const totalCourses = inProgressCourses.length + completedCourses.length;
+
+  // Celebrate any badge unlocked since the last load.
+  useEffect(() => {
+    for (const a of newAchievements) {
+      toast.success(`Achievement unlocked: ${a.title}`, {
+        description: a.description,
+      });
+    }
+  }, [newAchievements]);
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -260,6 +383,8 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
       </div>
 
       <LevelHeader level={level} otherLearners={otherLearners} />
+
+      <AchievementsShowcase achievements={achievementShowcase} />
 
       {totalCourses === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
