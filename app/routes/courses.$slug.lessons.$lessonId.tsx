@@ -425,14 +425,16 @@ export async function action({ params, request }: Route.ActionArgs) {
       throw data("Invalid quiz ID", { status: 400 });
     }
 
-    // Collect answers: form fields named "question-{questionId}" with value = optionId
-    const selectedAnswers: Record<number, number> = {};
+    // Collect answers: form fields named "question-{questionId}" with value =
+    // optionId. Multi-select questions submit several values under the same name,
+    // so each question maps to an array of selected option ids.
+    const selectedAnswers: Record<number, number[]> = {};
     for (const [key, value] of formData.entries()) {
       if (key.startsWith("question-")) {
         const questionId = Number(key.replace("question-", ""));
         const optionId = Number(value);
         if (!isNaN(questionId) && !isNaN(optionId)) {
-          selectedAnswers[questionId] = optionId;
+          (selectedAnswers[questionId] ??= []).push(optionId);
         }
       }
     }
@@ -1183,6 +1185,9 @@ function QuizSection({
     questionResults: Array<{
       questionId: number;
       correct: boolean;
+      score: number;
+      selectedOptionIds: number[];
+      correctOptionIds: number[];
       selectedOptionId: number | null;
       correctOptionId: number | null;
     }>;
@@ -1195,8 +1200,10 @@ function QuizSection({
   isSubmitting: boolean;
 }) {
   const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
+  // Each question maps to the option ids the student has selected. Single-select
+  // questions hold a 1-element array; multi-select questions hold several.
   const [selectedAnswers, setSelectedAnswers] = useState<
-    Record<number, number>
+    Record<number, number[]>
   >({});
   const [showQuiz, setShowQuiz] = useState(!bestAttempt?.passed);
   const [retaking, setRetaking] = useState(false);
@@ -1222,7 +1229,7 @@ function QuizSection({
   }, [quizError]);
 
   const allAnswered = quiz.questions.every(
-    (q) => selectedAnswers[q.id] !== undefined
+    (q) => (selectedAnswers[q.id]?.length ?? 0) > 0
   );
   const showResult = quizResult && !retaking;
 
@@ -1276,12 +1283,22 @@ function QuizSection({
                     )}
                     <p className="font-medium">
                       {qIndex + 1}. {question.questionText}
+                      {question.questionType === "multi_select" &&
+                        result &&
+                        !result.correct &&
+                        result.score > 0 && (
+                          <span className="ml-2 text-sm font-normal text-amber-600 dark:text-amber-400">
+                            (partial credit: {Math.round(result.score * 100)}%)
+                          </span>
+                        )}
                     </p>
                   </div>
                   <div className="ml-7 space-y-1">
                     {question.options.map((option) => {
-                      const isSelected = result?.selectedOptionId === option.id;
-                      const isCorrect = result?.correctOptionId === option.id;
+                      const isSelected =
+                        result?.selectedOptionIds.includes(option.id) ?? false;
+                      const isCorrect =
+                        result?.correctOptionIds.includes(option.id) ?? false;
                       let className = "text-sm";
                       if (isCorrect)
                         className +=
@@ -1399,36 +1416,57 @@ function QuizSection({
           <input type="hidden" name="quizId" value={quiz.id} />
 
           <div className="space-y-6">
-            {quiz.questions.map((question, qIndex) => (
-              <div key={question.id} className="rounded-lg border p-4">
-                <p className="mb-3 font-medium">
-                  {qIndex + 1}. {question.questionText}
-                </p>
-                <div className="space-y-2">
-                  {question.options.map((option) => (
-                    <label
-                      key={option.id}
-                      className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-muted"
-                    >
-                      <input
-                        type="radio"
-                        name={`question-${question.id}`}
-                        value={option.id}
-                        checked={selectedAnswers[question.id] === option.id}
-                        onChange={() =>
-                          setSelectedAnswers((prev) => ({
-                            ...prev,
-                            [question.id]: option.id,
-                          }))
-                        }
-                        className="size-4 accent-primary"
-                      />
-                      <span className="text-sm">{option.optionText}</span>
-                    </label>
-                  ))}
+            {quiz.questions.map((question, qIndex) => {
+              const isMulti = question.questionType === "multi_select";
+              const selected = selectedAnswers[question.id] ?? [];
+              return (
+                <div key={question.id} className="rounded-lg border p-4">
+                  <p className="mb-1 font-medium">
+                    {qIndex + 1}. {question.questionText}
+                  </p>
+                  {isMulti && (
+                    <p className="mb-3 text-xs text-muted-foreground">
+                      Select all that apply.
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    {question.options.map((option) => {
+                      const checked = selected.includes(option.id);
+                      return (
+                        <label
+                          key={option.id}
+                          className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-muted"
+                        >
+                          <input
+                            type={isMulti ? "checkbox" : "radio"}
+                            name={`question-${question.id}`}
+                            value={option.id}
+                            checked={checked}
+                            onChange={() =>
+                              setSelectedAnswers((prev) => {
+                                if (!isMulti) {
+                                  return {
+                                    ...prev,
+                                    [question.id]: [option.id],
+                                  };
+                                }
+                                const current = prev[question.id] ?? [];
+                                const next = current.includes(option.id)
+                                  ? current.filter((id) => id !== option.id)
+                                  : [...current, option.id];
+                                return { ...prev, [question.id]: next };
+                              })
+                            }
+                            className={`size-4 accent-primary ${isMulti ? "rounded" : ""}`}
+                          />
+                          <span className="text-sm">{option.optionText}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-6">

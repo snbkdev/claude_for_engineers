@@ -58,7 +58,11 @@ const quizParamsSchema = v.object({
 });
 
 const wizardDataSchema = v.object({
-  title: v.pipe(v.string(), v.trim(), v.minLength(1, "Quiz title is required.")),
+  title: v.pipe(
+    v.string(),
+    v.trim(),
+    v.minLength(1, "Quiz title is required.")
+  ),
   passingScore: v.number(),
   questions: v.pipe(
     v.array(
@@ -114,6 +118,12 @@ function generateId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function typeLabel(type: QuestionType): string {
+  if (type === QuestionType.TrueFalse) return "True/False";
+  if (type === QuestionType.MultiSelect) return "Multiple Answers";
+  return "Multiple Choice";
+}
+
 // ─── Meta ───
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
@@ -136,8 +146,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   const user = getUserById(currentUserId);
-  if (!user || (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)) {
-    throw data("Only instructors and admins can access this page.", { status: 403 });
+  if (
+    !user ||
+    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
+  ) {
+    throw data("Only instructors and admins can access this page.", {
+      status: 403,
+    });
   }
 
   const courseId = parseInt(params.courseId, 10);
@@ -188,14 +203,22 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   const user = getUserById(currentUserId);
-  if (!user || (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)) {
-    throw data("Only instructors and admins can manage quizzes.", { status: 403 });
+  if (
+    !user ||
+    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
+  ) {
+    throw data("Only instructors and admins can manage quizzes.", {
+      status: 403,
+    });
   }
 
   const { courseId, lessonId } = parseParams(params, quizParamsSchema);
 
   const course = getCourseById(courseId);
-  if (!course || (course.instructorId !== currentUserId && user.role !== UserRole.Admin)) {
+  if (
+    !course ||
+    (course.instructorId !== currentUserId && user.role !== UserRole.Admin)
+  ) {
     throw data("Course not found or not yours.", { status: 403 });
   }
 
@@ -213,7 +236,10 @@ export async function action({ params, request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, quizActionSchema);
 
   if (!parsed.success) {
-    return data({ error: Object.values(parsed.errors)[0] ?? "Invalid input." }, { status: 400 });
+    return data(
+      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
+      { status: 400 }
+    );
   }
 
   const { intent } = parsed.data;
@@ -247,12 +273,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     // Create questions and options
     for (let qi = 0; qi < wizardData.questions.length; qi++) {
       const q = wizardData.questions[qi];
-      const question = createQuestion(
-        quiz.id,
-        q.text.trim(),
-        q.type,
-        qi + 1
-      );
+      const question = createQuestion(quiz.id, q.text.trim(), q.type, qi + 1);
 
       for (const opt of q.options) {
         createOption(question.id, opt.text.trim(), opt.isCorrect);
@@ -311,9 +332,7 @@ function StepIndicator({
             )}
             {step.label}
           </button>
-          {i < STEPS.length - 1 && (
-            <div className="mx-2 h-px w-8 bg-border" />
-          )}
+          {i < STEPS.length - 1 && <div className="mx-2 h-px w-8 bg-border" />}
         </div>
       ))}
     </div>
@@ -451,25 +470,39 @@ export default function QuizBuilderWizard({
       questions: prev.questions.map((q) => {
         if (q.id !== questionId) return q;
         const updated = { ...q, ...updates };
-        // When switching to TrueFalse, reset options to True/False
-        if (
-          updates.type === QuestionType.TrueFalse &&
-          q.type !== QuestionType.TrueFalse
-        ) {
-          updated.options = [
-            { id: generateId(), text: "True", isCorrect: true },
-            { id: generateId(), text: "False", isCorrect: false },
-          ];
-        }
-        // When switching to MultipleChoice from TrueFalse, add blank options
-        if (
-          updates.type === QuestionType.MultipleChoice &&
-          q.type !== QuestionType.MultipleChoice
-        ) {
-          updated.options = [
-            { id: generateId(), text: "", isCorrect: true },
-            { id: generateId(), text: "", isCorrect: false },
-          ];
+        const newType = updates.type;
+        if (newType && newType !== q.type) {
+          if (newType === QuestionType.TrueFalse) {
+            // Switching to True/False resets to the fixed two options.
+            updated.options = [
+              { id: generateId(), text: "True", isCorrect: true },
+              { id: generateId(), text: "False", isCorrect: false },
+            ];
+          } else if (q.type === QuestionType.TrueFalse) {
+            // Leaving True/False → blank free-text options.
+            updated.options = [
+              { id: generateId(), text: "", isCorrect: true },
+              { id: generateId(), text: "", isCorrect: false },
+            ];
+          } else if (newType === QuestionType.MultipleChoice) {
+            // Multiple Answers → Multiple Choice: keep only the first correct
+            // option (single-answer questions allow exactly one).
+            let kept = false;
+            updated.options = q.options.map((o) => {
+              if (o.isCorrect && !kept) {
+                kept = true;
+                return o;
+              }
+              return { ...o, isCorrect: false };
+            });
+            if (!kept && updated.options.length > 0) {
+              updated.options = updated.options.map((o, i) =>
+                i === 0 ? { ...o, isCorrect: true } : o
+              );
+            }
+          }
+          // Multiple Choice → Multiple Answers keeps options as-is (multiple
+          // correct answers are now allowed).
         }
         return updated;
       }),
@@ -518,11 +551,7 @@ export default function QuizBuilderWizard({
                     className="space-y-4"
                   >
                     {wizard.questions.map((q, idx) => (
-                      <Draggable
-                        key={q.id}
-                        draggableId={q.id}
-                        index={idx}
-                      >
+                      <Draggable key={q.id} draggableId={q.id} index={idx}>
                         {(dragProvided, snapshot) => (
                           <div
                             ref={dragProvided.innerRef}
@@ -574,8 +603,11 @@ export default function QuizBuilderWizard({
                                       Multiple Choice
                                     </SelectItem>
                                     <SelectItem
-                                      value={QuestionType.TrueFalse}
+                                      value={QuestionType.MultiSelect}
                                     >
+                                      Multiple Answers
+                                    </SelectItem>
+                                    <SelectItem value={QuestionType.TrueFalse}>
                                       True / False
                                     </SelectItem>
                                   </SelectContent>
@@ -675,6 +707,22 @@ export default function QuizBuilderWizard({
     }));
   }
 
+  // Multiple Answers: toggle a single option's correctness (several may be set).
+  function toggleCorrectOption(questionId: string, optionId: string) {
+    setWizard((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) => {
+        if (q.id !== questionId) return q;
+        return {
+          ...q,
+          options: q.options.map((o) =>
+            o.id === optionId ? { ...o, isCorrect: !o.isCorrect } : o
+          ),
+        };
+      }),
+    }));
+  }
+
   function renderStep3() {
     return (
       <div className="space-y-4">
@@ -682,8 +730,7 @@ export default function QuizBuilderWizard({
           <CardHeader>
             <h2 className="text-lg font-semibold">Answer Options</h2>
             <p className="text-sm text-muted-foreground">
-              Set answer options for each question and mark the correct
-              answer.
+              Set answer options for each question and mark the correct answer.
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -693,52 +740,65 @@ export default function QuizBuilderWizard({
               </p>
             )}
 
-            {wizard.questions.map((q, idx) => (
-              <div key={q.id} className="rounded-lg border p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                    {idx + 1}
-                  </span>
-                  <span className="font-medium">
-                    {q.text || "(No question text)"}
-                  </span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {q.type === QuestionType.TrueFalse
-                      ? "True/False"
-                      : "Multiple Choice"}
-                  </span>
-                </div>
+            {wizard.questions.map((q, idx) => {
+              const isMulti = q.type === QuestionType.MultiSelect;
+              const editableOptions = q.type !== QuestionType.TrueFalse;
+              return (
+                <div key={q.id} className="rounded-lg border p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                      {idx + 1}
+                    </span>
+                    <span className="font-medium">
+                      {q.text || "(No question text)"}
+                    </span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {typeLabel(q.type)}
+                    </span>
+                  </div>
 
-                <div className="space-y-2">
-                  {q.options.map((opt) => (
-                    <div key={opt.id} className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setCorrectOption(q.id, opt.id)}
-                        className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                          opt.isCorrect
-                            ? "border-green-500 bg-green-500 text-white"
-                            : "border-muted-foreground/30 hover:border-green-500/50"
-                        }`}
-                      >
-                        {opt.isCorrect && <Check className="size-3" />}
-                      </button>
-                      {q.type === QuestionType.TrueFalse ? (
-                        <span className="text-sm">{opt.text}</span>
-                      ) : (
-                        <Input
-                          value={opt.text}
-                          onChange={(e) =>
-                            updateOption(q.id, opt.id, {
-                              text: e.target.value,
-                            })
+                  {isMulti && (
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Mark every correct option — students select all that
+                      apply.
+                    </p>
+                  )}
+
+                  <div className="space-y-2">
+                    {q.options.map((opt) => (
+                      <div key={opt.id} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isMulti
+                              ? toggleCorrectOption(q.id, opt.id)
+                              : setCorrectOption(q.id, opt.id)
                           }
-                          placeholder="Enter option text..."
-                          className="flex-1"
-                        />
-                      )}
-                      {q.type === QuestionType.MultipleChoice &&
-                        q.options.length > 2 && (
+                          className={`flex size-5 shrink-0 items-center justify-center border-2 transition-colors ${
+                            isMulti ? "rounded" : "rounded-full"
+                          } ${
+                            opt.isCorrect
+                              ? "border-green-500 bg-green-500 text-white"
+                              : "border-muted-foreground/30 hover:border-green-500/50"
+                          }`}
+                        >
+                          {opt.isCorrect && <Check className="size-3" />}
+                        </button>
+                        {q.type === QuestionType.TrueFalse ? (
+                          <span className="text-sm">{opt.text}</span>
+                        ) : (
+                          <Input
+                            value={opt.text}
+                            onChange={(e) =>
+                              updateOption(q.id, opt.id, {
+                                text: e.target.value,
+                              })
+                            }
+                            placeholder="Enter option text..."
+                            className="flex-1"
+                          />
+                        )}
+                        {editableOptions && q.options.length > 2 && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -748,23 +808,24 @@ export default function QuizBuilderWizard({
                             <Trash2 className="size-3" />
                           </Button>
                         )}
-                    </div>
-                  ))}
-                </div>
+                      </div>
+                    ))}
+                  </div>
 
-                {q.type === QuestionType.MultipleChoice && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => addOption(q.id)}
-                    className="mt-2"
-                  >
-                    <Plus className="mr-1 size-3" />
-                    Add Option
-                  </Button>
-                )}
-              </div>
-            ))}
+                  {editableOptions && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addOption(q.id)}
+                      className="mt-2"
+                    >
+                      <Plus className="mr-1 size-3" />
+                      Add Option
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       </div>
@@ -814,7 +875,8 @@ export default function QuizBuilderWizard({
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="space-y-1 text-sm">
                 <div>
-                  <span className="font-medium">Title:</span> {wizard.title || "(empty)"}
+                  <span className="font-medium">Title:</span>{" "}
+                  {wizard.title || "(empty)"}
                 </div>
                 <div>
                   <span className="font-medium">Passing Score:</span>{" "}
@@ -838,21 +900,24 @@ export default function QuizBuilderWizard({
                     {q.text || "(No question text)"}
                   </span>
                   <span className="ml-auto text-xs text-muted-foreground">
-                    {q.type === QuestionType.TrueFalse
-                      ? "True/False"
-                      : "Multiple Choice"}
+                    {typeLabel(q.type)}
                   </span>
                 </div>
                 <div className="ml-8 space-y-1">
                   {q.options.map((opt) => (
-                    <div key={opt.id} className="flex items-center gap-2 text-sm">
+                    <div
+                      key={opt.id}
+                      className="flex items-center gap-2 text-sm"
+                    >
                       {opt.isCorrect ? (
                         <CheckCircle2 className="size-4 text-green-500" />
                       ) : (
                         <XCircle className="size-4 text-muted-foreground/40" />
                       )}
                       <span
-                        className={opt.isCorrect ? "font-medium text-green-700" : ""}
+                        className={
+                          opt.isCorrect ? "font-medium text-green-700" : ""
+                        }
                       >
                         {opt.text || "(empty)"}
                       </span>
@@ -926,10 +991,7 @@ export default function QuizBuilderWizard({
           My Courses
         </Link>
         <span className="mx-2">/</span>
-        <Link
-          to={`/instructor/${course.id}`}
-          className="hover:text-foreground"
-        >
+        <Link to={`/instructor/${course.id}`} className="hover:text-foreground">
           {course.title}
         </Link>
         <span className="mx-2">/</span>
@@ -972,10 +1034,7 @@ export default function QuizBuilderWizard({
                   "Are you sure you want to delete this quiz? All student attempts will be lost."
                 )
               ) {
-                fetcher.submit(
-                  { intent: "delete-quiz" },
-                  { method: "post" }
-                );
+                fetcher.submit({ intent: "delete-quiz" }, { method: "post" });
               }
             }}
           >
@@ -1025,10 +1084,16 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       message = "The quiz, lesson, or course you're looking for doesn't exist.";
     } else if (error.status === 401) {
       title = "Sign in required";
-      message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "Please select a user from the DevUI panel.";
     } else if (error.status === 403) {
       title = "Access denied";
-      message = typeof error.data === "string" ? error.data : "You don't have permission to access this page.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "You don't have permission to access this page.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

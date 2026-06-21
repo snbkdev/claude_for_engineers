@@ -1188,6 +1188,16 @@ You've completed the Building REST APIs course. You now have the skills to build
         { text: ".tsrc", correct: false },
       ],
     },
+    {
+      text: "Which of these are TypeScript primitive types? (Select all that apply)",
+      type: QuestionType.MultiSelect,
+      options: [
+        { text: "string", correct: true },
+        { text: "number", correct: true },
+        { text: "boolean", correct: true },
+        { text: "integer", correct: false },
+      ],
+    },
   ];
 
   const quiz1OptionIds: {

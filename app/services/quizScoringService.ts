@@ -5,6 +5,7 @@ import {
   quizAnswers,
   lessonProgress,
   LessonProgressStatus,
+  QuestionType,
 } from "~/db/schema";
 import {
   getQuizWithQuestions,
@@ -22,9 +23,22 @@ export type Grade = "A" | "B" | "C" | "D" | "F";
 
 export interface QuestionResult {
   questionId: number;
-  correct: boolean;
-  selectedOptionId: number | null; // null = unanswered
+  correct: boolean; // fully correct (per-question score === 1)
+  score: number; // 0..1 partial credit for this question
+  selectedOptionIds: number[]; // empty = unanswered
+  correctOptionIds: number[];
+  // Legacy singular fields kept for single-select consumers/UI: the first
+  // selected/correct option (or null). Multi-select callers use the arrays.
+  selectedOptionId: number | null;
   correctOptionId: number | null;
+}
+
+// A selection per question: a single option id or several (multi-select).
+export type SelectedAnswers = Record<number, number | number[]>;
+
+function toIdArray(value: number | number[] | undefined): number[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 export interface AttemptResult {
@@ -60,12 +74,45 @@ export function calculateGrade(score: number): Grade {
 
 type ScorableQuestion = {
   id: number;
+  questionType: string; // QuestionType
   options: Array<{ id: number; isCorrect: boolean }>;
 };
 
+// Per-type scoring. Single-select (multiple_choice / true_false): all-or-nothing
+// on the one correct option. Multi-select: partial credit =
+// (correctSelected − incorrectSelected) / totalCorrect, clamped to [0, 1].
+function scoreQuestion(
+  question: ScorableQuestion,
+  selectedIds: number[]
+): { score: number; correctOptionIds: number[] } {
+  const correctOptionIds = question.options
+    .filter((o) => o.isCorrect === true)
+    .map((o) => o.id);
+  const correctSet = new Set(correctOptionIds);
+
+  if (question.questionType === QuestionType.MultiSelect) {
+    const totalCorrect = correctOptionIds.length;
+    if (totalCorrect === 0) return { score: 0, correctOptionIds };
+    let correctSelected = 0;
+    let incorrectSelected = 0;
+    for (const id of selectedIds) {
+      if (correctSet.has(id)) correctSelected++;
+      else incorrectSelected++;
+    }
+    const raw = (correctSelected - incorrectSelected) / totalCorrect;
+    const score = Math.max(0, Math.min(1, raw));
+    return { score, correctOptionIds };
+  }
+
+  // Single-select: correct iff the one chosen option is a correct option.
+  const selected = selectedIds[0] ?? null;
+  const score = selected !== null && correctSet.has(selected) ? 1 : 0;
+  return { score, correctOptionIds };
+}
+
 function scoreAnswers(opts: {
   questions: ScorableQuestion[];
-  selectedAnswers: Record<number, number>;
+  selectedAnswers: SelectedAnswers;
 }): {
   questionResults: QuestionResult[];
   totalCorrect: number;
@@ -75,23 +122,30 @@ function scoreAnswers(opts: {
   const { questions, selectedAnswers } = opts;
   const questionResults: QuestionResult[] = [];
   let totalCorrect = 0;
+  let scoreSum = 0;
 
   for (const question of questions) {
-    const selected = selectedAnswers[question.id] ?? null;
-    const correctOption = question.options.find((o) => o.isCorrect === true);
-    const correctOptionId = correctOption ? correctOption.id : null;
-    const correct = selected !== null && selected === correctOptionId;
+    const selectedOptionIds = toIdArray(selectedAnswers[question.id]);
+    const { score, correctOptionIds } = scoreQuestion(
+      question,
+      selectedOptionIds
+    );
+    const correct = score === 1;
     if (correct) totalCorrect++;
+    scoreSum += score;
     questionResults.push({
       questionId: question.id,
       correct,
-      selectedOptionId: selected,
-      correctOptionId,
+      score,
+      selectedOptionIds,
+      correctOptionIds,
+      selectedOptionId: selectedOptionIds[0] ?? null,
+      correctOptionId: correctOptionIds[0] ?? null,
     });
   }
 
   const totalQuestions = questions.length;
-  const score = totalQuestions > 0 ? totalCorrect / totalQuestions : 0;
+  const score = totalQuestions > 0 ? scoreSum / totalQuestions : 0;
 
   return { questionResults, totalCorrect, totalQuestions, score };
 }
@@ -171,7 +225,7 @@ export function countQuizAttempts(opts: {
 export function submitQuizAttempt(opts: {
   userId: number;
   quizId: number;
-  selectedAnswers: Record<number, number>;
+  selectedAnswers: SelectedAnswers;
 }): SubmitQuizResult {
   const quiz = getQuizWithQuestions(opts.quizId);
   if (!quiz) {
@@ -212,12 +266,13 @@ export function submitQuizAttempt(opts: {
       .get();
 
     for (const result of questionResults) {
-      if (result.selectedOptionId !== null) {
+      // One row per selected option (multi-select records several).
+      for (const optionId of result.selectedOptionIds) {
         tx.insert(quizAnswers)
           .values({
             attemptId: attempt.id,
             questionId: result.questionId,
-            selectedOptionId: result.selectedOptionId,
+            selectedOptionId: optionId,
           })
           .run();
       }
@@ -277,9 +332,9 @@ export function getAttemptReview(attemptId: number): AttemptReview | null {
   if (!quiz) return null;
 
   const answers = getAnswersByAttempt(attemptId);
-  const selectedAnswers: Record<number, number> = {};
+  const selectedAnswers: Record<number, number[]> = {};
   for (const answer of answers) {
-    selectedAnswers[answer.questionId] = answer.selectedOptionId;
+    (selectedAnswers[answer.questionId] ??= []).push(answer.selectedOptionId);
   }
 
   const { questionResults, totalCorrect, totalQuestions } = scoreAnswers({

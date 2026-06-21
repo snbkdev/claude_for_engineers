@@ -73,6 +73,47 @@ function seedMCQuestion(quizId: number, position: number) {
   return { question: q, correct, wrong };
 }
 
+// Seeds a multi-select question with `correctCount` correct options followed by
+// `wrongCount` incorrect ones. Returns the question plus the inserted option ids.
+function seedMultiSelectQuestion(
+  quizId: number,
+  position: number,
+  correctCount: number,
+  wrongCount: number
+) {
+  const q = testDb
+    .insert(schema.quizQuestions)
+    .values({
+      quizId,
+      questionText: `MS${position}`,
+      questionType: QuestionType.MultiSelect,
+      position,
+    })
+    .returning()
+    .get();
+  const correct: number[] = [];
+  const wrong: number[] = [];
+  for (let i = 0; i < correctCount; i++) {
+    correct.push(
+      testDb
+        .insert(schema.quizOptions)
+        .values({ questionId: q.id, optionText: `C${i}`, isCorrect: true })
+        .returning()
+        .get().id
+    );
+  }
+  for (let i = 0; i < wrongCount; i++) {
+    wrong.push(
+      testDb
+        .insert(schema.quizOptions)
+        .values({ questionId: q.id, optionText: `W${i}`, isCorrect: false })
+        .returning()
+        .get().id
+    );
+  }
+  return { question: q, correct, wrong };
+}
+
 describe("quizScoringService", () => {
   beforeEach(() => {
     testDb = createTestDb();
@@ -324,6 +365,92 @@ describe("quizScoringService", () => {
         selectedAnswers: {},
       });
       expect(outcome.ok).toBe(false);
+    });
+  });
+
+  describe("multi-select scoring", () => {
+    it("gives full credit when exactly the correct set is chosen", () => {
+      const quiz = seedQuiz();
+      const ms = seedMultiSelectQuestion(quiz.id, 1, 2, 2);
+
+      const outcome = submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: { [ms.question.id]: ms.correct },
+      });
+
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.result.score).toBe(1);
+      const r = outcome.result.questionResults[0];
+      expect(r.correct).toBe(true);
+      expect(r.score).toBe(1);
+      expect(r.selectedOptionIds.sort()).toEqual([...ms.correct].sort());
+      expect(r.correctOptionIds.sort()).toEqual([...ms.correct].sort());
+    });
+
+    it("awards partial credit: (correct − incorrect) / totalCorrect", () => {
+      const quiz = seedQuiz();
+      // 3 correct options; pick 2 correct + 1 wrong → (2 − 1) / 3 = 1/3.
+      const ms = seedMultiSelectQuestion(quiz.id, 1, 3, 2);
+
+      const outcome = submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: {
+          [ms.question.id]: [ms.correct[0], ms.correct[1], ms.wrong[0]],
+        },
+      });
+
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.result.score).toBeCloseTo(1 / 3, 5);
+      expect(outcome.result.questionResults[0].correct).toBe(false);
+    });
+
+    it("penalizes wrong picks and clamps the question score at 0", () => {
+      const quiz = seedQuiz();
+      // 2 correct; pick 0 correct + 2 wrong → (0 − 2) / 2 = −1 → clamped to 0.
+      const ms = seedMultiSelectQuestion(quiz.id, 1, 2, 2);
+
+      const outcome = submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: { [ms.question.id]: ms.wrong },
+      });
+
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.result.score).toBe(0);
+    });
+
+    it("persists one answer row per selected option", () => {
+      const quiz = seedQuiz();
+      const ms = seedMultiSelectQuestion(quiz.id, 1, 2, 1);
+
+      const outcome = submitQuizAttempt({
+        userId: base.user.id,
+        quizId: quiz.id,
+        selectedAnswers: {
+          [ms.question.id]: [ms.correct[0], ms.wrong[0]],
+        },
+      });
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+
+      const answers = testDb
+        .select()
+        .from(schema.quizAnswers)
+        .where(eq(schema.quizAnswers.attemptId, outcome.result.attemptId))
+        .all();
+      expect(answers).toHaveLength(2);
+
+      // A review reconstructs the multi-select selection from those rows.
+      const review = getAttemptReview(outcome.result.attemptId)!;
+      const r = review.questionResults[0];
+      expect(r.selectedOptionIds.sort()).toEqual(
+        [ms.correct[0], ms.wrong[0]].sort()
+      );
     });
   });
 
