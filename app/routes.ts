@@ -10,6 +10,7 @@ export default [
   layout("routes/layout.app.tsx", [
     route("dashboard", "routes/dashboard.tsx"),
     route("leaderboard", "routes/leaderboard.tsx"),
+    route("u/:userId", "routes/u.$userId.tsx"),
     route("notes", "routes/notes.tsx"),
     route("courses", "routes/courses.tsx"),
     route("courses/:slug", "routes/courses.$slug.tsx"),

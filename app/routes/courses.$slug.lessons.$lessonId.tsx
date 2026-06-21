@@ -2026,7 +2026,12 @@ function CommentBody({
       />
       <div className="flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">{comment.userName}</span>
+          <Link
+            to={`/u/${comment.userId}`}
+            className="text-sm font-medium hover:text-primary hover:underline"
+          >
+            {comment.userName}
+          </Link>
           {isAuthorInstructor && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               Instructor

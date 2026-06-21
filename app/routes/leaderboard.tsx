@@ -130,7 +130,12 @@ function LeaderboardRow({ entry }: { entry: Entry }) {
       />
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">
-          {entry.name}
+          <Link
+            to={`/u/${entry.userId}`}
+            className="hover:text-primary hover:underline"
+          >
+            {entry.name}
+          </Link>
           {entry.isCurrentUser && (
             <span className="ml-2 text-xs text-primary">You</span>
           )}
