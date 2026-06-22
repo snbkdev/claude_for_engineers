@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { NotificationType } from "~/db/schema";
@@ -55,13 +56,51 @@ describe("notificationService", () => {
       expect(n.isRead).toBe(false);
       expect(n.createdAt).toBeDefined();
     });
+
+    it("mirrors the notification to the email outbox", () => {
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "New Enrollment",
+        "Test User enrolled in Test Course",
+        "/instructor/1/students"
+      );
+
+      const queued = testDb
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.recipientUserId, base.instructor.id))
+        .all();
+      expect(queued).toHaveLength(1);
+      expect(queued[0].toEmail).toBe(base.instructor.email);
+      expect(queued[0].subject).toBe("New Enrollment");
+      expect(queued[0].status).toBe(schema.EmailStatus.Pending);
+    });
   });
 
   describe("getNotifications", () => {
     it("returns notifications newest first", () => {
-      createNotification(base.instructor.id, NotificationType.Enrollment, "First", "m1", "/a");
-      createNotification(base.instructor.id, NotificationType.Enrollment, "Second", "m2", "/b");
-      createNotification(base.instructor.id, NotificationType.Enrollment, "Third", "m3", "/c");
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "First",
+        "m1",
+        "/a"
+      );
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "Second",
+        "m2",
+        "/b"
+      );
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "Third",
+        "m3",
+        "/c"
+      );
 
       const list = getNotifications(base.instructor.id, 10, 0);
       expect(list).toHaveLength(3);
@@ -71,7 +110,13 @@ describe("notificationService", () => {
 
     it("respects limit and offset", () => {
       for (let i = 1; i <= 5; i++) {
-        createNotification(base.instructor.id, NotificationType.Enrollment, `N${i}`, "m", "/x");
+        createNotification(
+          base.instructor.id,
+          NotificationType.Enrollment,
+          `N${i}`,
+          "m",
+          "/x"
+        );
       }
 
       const firstPage = getNotifications(base.instructor.id, 2, 0);
@@ -87,8 +132,20 @@ describe("notificationService", () => {
 
     it("only returns the requesting user's notifications", () => {
       const other = makeUser("Other Instructor", "other@example.com");
-      createNotification(base.instructor.id, NotificationType.Enrollment, "Mine", "m", "/x");
-      createNotification(other.id, NotificationType.Enrollment, "Theirs", "m", "/x");
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "Mine",
+        "m",
+        "/x"
+      );
+      createNotification(
+        other.id,
+        NotificationType.Enrollment,
+        "Theirs",
+        "m",
+        "/x"
+      );
 
       const mine = getNotifications(base.instructor.id, 10, 0);
       expect(mine).toHaveLength(1);
@@ -102,8 +159,20 @@ describe("notificationService", () => {
 
   describe("getUnreadCount", () => {
     it("counts only unread notifications for the user", () => {
-      const a = createNotification(base.instructor.id, NotificationType.Enrollment, "A", "m", "/x");
-      createNotification(base.instructor.id, NotificationType.Enrollment, "B", "m", "/x");
+      const a = createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "A",
+        "m",
+        "/x"
+      );
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "B",
+        "m",
+        "/x"
+      );
       const other = makeUser("Other", "other2@example.com");
       createNotification(other.id, NotificationType.Enrollment, "C", "m", "/x");
 
@@ -120,7 +189,13 @@ describe("notificationService", () => {
 
   describe("markAsRead", () => {
     it("marks a single notification as read", () => {
-      const n = createNotification(base.instructor.id, NotificationType.Enrollment, "A", "m", "/x");
+      const n = createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "A",
+        "m",
+        "/x"
+      );
 
       const updated = markAsRead(n.id);
       expect(updated!.isRead).toBe(true);
@@ -130,10 +205,28 @@ describe("notificationService", () => {
 
   describe("markAllAsRead", () => {
     it("marks all of a user's notifications as read without touching others", () => {
-      createNotification(base.instructor.id, NotificationType.Enrollment, "A", "m", "/x");
-      createNotification(base.instructor.id, NotificationType.Enrollment, "B", "m", "/x");
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "A",
+        "m",
+        "/x"
+      );
+      createNotification(
+        base.instructor.id,
+        NotificationType.Enrollment,
+        "B",
+        "m",
+        "/x"
+      );
       const other = makeUser("Other", "other3@example.com");
-      const theirs = createNotification(other.id, NotificationType.Enrollment, "C", "m", "/x");
+      const theirs = createNotification(
+        other.id,
+        NotificationType.Enrollment,
+        "C",
+        "m",
+        "/x"
+      );
 
       markAllAsRead(base.instructor.id);
 

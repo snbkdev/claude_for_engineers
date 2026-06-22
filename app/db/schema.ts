@@ -44,6 +44,12 @@ export enum NotificationType {
   GiftClaimed = "gift_claimed",
 }
 
+export enum EmailStatus {
+  Pending = "pending",
+  Sent = "sent",
+  Failed = "failed",
+}
+
 // ─── Tables ───
 
 export const users = sqliteTable("users", {
@@ -442,6 +448,30 @@ export const notifications = sqliteTable("notifications", {
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+});
+
+// Email "outbox" — every in-app notification is mirrored to a queued email here
+// (createNotification enqueues), then a dispatcher (flushEmailOutbox) sends them
+// via the configured EmailAdapter and marks each sent/failed. Decoupling send
+// from the request keeps notifications fast and makes delivery retryable.
+export const emailOutbox = sqliteTable("email_outbox", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  recipientUserId: integer("recipient_user_id")
+    .notNull()
+    .references(() => users.id),
+  toEmail: text("to_email").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  status: text("status")
+    .notNull()
+    .$type<EmailStatus>()
+    .default(EmailStatus.Pending),
+  attempts: integer("attempts").notNull().default(0),
+  error: text("error"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  sentAt: text("sent_at"),
 });
 
 // Certificates issued when a student reaches 100% progress on a course. One per

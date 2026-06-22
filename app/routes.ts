@@ -48,6 +48,7 @@ export default [
     route("admin/categories", "routes/admin.categories.tsx"),
     route("admin/promos", "routes/admin.promos.tsx"),
     route("admin/purchases", "routes/admin.purchases.tsx"),
+    route("admin/emails", "routes/admin.emails.tsx"),
     route("settings", "routes/settings.tsx"),
     route("team", "routes/team.tsx"),
     route("wishlist", "routes/wishlist.tsx"),

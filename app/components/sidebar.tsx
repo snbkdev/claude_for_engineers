@@ -26,6 +26,7 @@ import {
   Receipt,
   Heart,
   Gift,
+  Mail,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -143,6 +144,12 @@ const navItems: NavItem[] = [
     label: "Purchases",
     to: "/admin/purchases",
     icon: <Receipt className="size-4" />,
+    roles: [UserRole.Admin],
+  },
+  {
+    label: "Email Outbox",
+    to: "/admin/emails",
+    icon: <Mail className="size-4" />,
     roles: [UserRole.Admin],
   },
 ];

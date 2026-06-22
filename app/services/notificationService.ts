@@ -1,11 +1,14 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { notifications, NotificationType } from "~/db/schema";
+import { enqueueEmail, composeEmailBody } from "./emailService";
 
 // ─── Notification Service ───
 // In-app notifications delivered to a recipient user. Generic by design
-// (type/title/message/linkUrl); enrollment is the only producer for now.
-// Functions use positional params (each differs in type / read intent).
+// (type/title/message/linkUrl). Every notification is also mirrored to the email
+// outbox (delivered later by the dispatcher), so producers get both channels
+// from one call. Functions use positional params (each differs in type / read
+// intent).
 
 export function createNotification(
   recipientUserId: number,
@@ -14,14 +17,28 @@ export function createNotification(
   message: string,
   linkUrl: string
 ) {
-  return db
+  const notification = db
     .insert(notifications)
     .values({ recipientUserId, type, title, message, linkUrl })
     .returning()
     .get();
+
+  // Mirror to email (queued; delivered by flushEmailOutbox). Best-effort: a
+  // missing recipient email simply queues nothing.
+  enqueueEmail({
+    recipientUserId,
+    subject: title,
+    body: composeEmailBody(message, linkUrl),
+  });
+
+  return notification;
 }
 
-export function getNotifications(userId: number, limit: number, offset: number) {
+export function getNotifications(
+  userId: number,
+  limit: number,
+  offset: number
+) {
   return db
     .select()
     .from(notifications)
@@ -33,11 +50,7 @@ export function getNotifications(userId: number, limit: number, offset: number) 
 }
 
 export function getNotificationById(id: number) {
-  return db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.id, id))
-    .get();
+  return db.select().from(notifications).where(eq(notifications.id, id)).get();
 }
 
 export function getUnreadCount(userId: number) {
