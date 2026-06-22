@@ -49,6 +49,7 @@ export default [
     route("admin/purchases", "routes/admin.purchases.tsx"),
     route("settings", "routes/settings.tsx"),
     route("team", "routes/team.tsx"),
+    route("wishlist", "routes/wishlist.tsx"),
     route("redeem/:code", "routes/redeem.$code.tsx"),
   ]),
   route("signup", "routes/signup.tsx"),
@@ -64,6 +65,7 @@ export default [
   route("api/switch-user", "routes/api.switch-user.ts"),
   route("api/logout", "routes/api.logout.ts"),
   route("api/video-tracking", "routes/api.video-tracking.ts"),
+  route("api/wishlist", "routes/api.wishlist.ts"),
   route("api/set-dev-country", "routes/api.set-dev-country.ts"),
   route("api/notifications/mark-read", "routes/api.notifications.mark-read.ts"),
   route(

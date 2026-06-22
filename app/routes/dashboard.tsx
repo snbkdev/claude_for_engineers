@@ -20,11 +20,15 @@ import {
   MAX_REFUND_WATCHED_LESSONS,
 } from "~/services/transactionService";
 import { countWatchedLessonsInCourse } from "~/services/videoTrackingService";
+import { getWishlist } from "~/services/wishlistService";
+import { resolveCountry } from "~/lib/country.server";
+import { calculatePppPrice } from "~/lib/ppp";
+import { formatPrice } from "~/lib/utils";
 import {
   evaluateAchievements,
   getAchievementShowcase,
 } from "~/services/achievementService";
-import { UserRole } from "~/db/schema";
+import { UserRole, CourseStatus } from "~/db/schema";
 import {
   computeXp,
   levelFromXp,
@@ -48,6 +52,7 @@ import {
   Flame,
   Footprints,
   GraduationCap,
+  Heart,
   Library,
   Lock,
   PlayCircle,
@@ -162,6 +167,25 @@ export async function loader({ request }: Route.LoaderArgs) {
   const newAchievements = evaluateAchievements({ userId: currentUserId });
   const achievementShowcase = getAchievementShowcase(currentUserId);
 
+  // Wishlist ("buy later") — drop owned/unpublished courses, apply PPP pricing.
+  const enrolledCourseIds = new Set(enrolledCourses.map((e) => e.courseId));
+  const country = await resolveCountry(request);
+  const wishlist = getWishlist(currentUserId)
+    .filter(
+      (w) =>
+        !enrolledCourseIds.has(w.courseId) &&
+        w.status === CourseStatus.Published
+    )
+    .map((w) => ({
+      id: w.id,
+      courseId: w.courseId,
+      title: w.title,
+      slug: w.slug,
+      coverImageUrl: w.coverImageUrl,
+      price: w.price,
+      pppPrice: w.pppEnabled ? calculatePppPrice(w.price, country) : w.price,
+    }));
+
   return {
     inProgressCourses,
     completedCourses,
@@ -170,6 +194,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     otherLearners,
     newAchievements,
     achievementShowcase,
+    wishlist,
   };
 }
 
@@ -451,6 +476,83 @@ function RefundButton({ purchaseId }: { purchaseId: number }) {
   );
 }
 
+type WishlistEntry = {
+  id: number;
+  courseId: number;
+  title: string;
+  slug: string;
+  coverImageUrl: string | null;
+  price: number;
+  pppPrice: number;
+};
+
+function WishlistBlock({ items }: { items: WishlistEntry[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <Card className="mb-8">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <Heart className="size-5 text-rose-500" />
+          <h2 className="text-lg font-semibold">Your wishlist</h2>
+        </div>
+        <Link
+          to="/wishlist"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          View all
+        </Link>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.slice(0, 3).map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 rounded-lg border p-3"
+            >
+              <Link
+                to={`/courses/${item.slug}`}
+                className="size-14 shrink-0 overflow-hidden rounded-md"
+              >
+                <CourseImage
+                  src={item.coverImageUrl}
+                  alt={item.title}
+                  className="h-full w-full object-cover"
+                />
+              </Link>
+              <div className="min-w-0 flex-1">
+                <Link
+                  to={`/courses/${item.slug}`}
+                  className="line-clamp-1 text-sm font-medium hover:text-primary"
+                >
+                  {item.title}
+                </Link>
+                <div className="mt-0.5 text-sm font-semibold">
+                  {item.pppPrice < item.price ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-xs font-normal text-muted-foreground line-through">
+                        {formatPrice(item.price)}
+                      </span>
+                      {formatPrice(item.pppPrice)}
+                    </span>
+                  ) : (
+                    formatPrice(item.price)
+                  )}
+                </div>
+              </div>
+              <Link to={`/courses/${item.slug}/purchase`}>
+                <Button size="sm" variant="outline">
+                  Buy
+                </Button>
+              </Link>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DashboardCardSkeleton() {
   return (
     <Card className="flex flex-col">
@@ -501,6 +603,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     otherLearners,
     newAchievements,
     achievementShowcase,
+    wishlist,
   } = loaderData;
   const totalCourses = inProgressCourses.length + completedCourses.length;
 
@@ -538,6 +641,8 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
       />
 
       <AchievementsShowcase achievements={achievementShowcase} />
+
+      <WishlistBlock items={wishlist} />
 
       {totalCourses === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">

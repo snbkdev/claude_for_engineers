@@ -335,6 +335,21 @@ export const lessonBookmarks = sqliteTable("lesson_bookmarks", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Course-level wishlist ("save for later"). A student saves courses they intend
+// to buy later; one row per (user, course), shown newest-first on their wishlist.
+export const wishlistItems = sqliteTable("wishlist_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  courseId: integer("course_id")
+    .notNull()
+    .references(() => courses.id),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 // Private per-student notes on individual lessons. A student can keep several
 // notes per lesson and edit/delete them at will; only the author ever sees them.
 export const lessonNotes = sqliteTable("lesson_notes", {

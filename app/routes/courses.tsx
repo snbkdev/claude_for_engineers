@@ -39,6 +39,8 @@ import {
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice } from "~/lib/ppp";
 import { getAverageRatingsForCourses } from "~/services/ratingService";
+import { getWishlistCourseIds } from "~/services/wishlistService";
+import { WishlistButton } from "~/components/wishlist-button";
 
 export function meta() {
   return [
@@ -90,6 +92,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const courseIds = courses.map((c) => c.id);
   const ratingsMap = getAverageRatingsForCourses(courseIds);
+  const wishlistedIds = currentUserId
+    ? new Set(getWishlistCourseIds(currentUserId))
+    : new Set<number>();
 
   const coursesWithLessonCount = courses.map((course) => {
     const userProgress = progressMap.get(course.id);
@@ -107,6 +112,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       pppPrice,
       averageRating: ratingData?.average ?? null,
       ratingCount: ratingData?.count ?? 0,
+      wishlisted: wishlistedIds.has(course.id),
     };
   });
 
@@ -226,110 +232,122 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {courses.map((course) => (
-            <Link
-              key={course.id}
-              to={`/courses/${course.slug}`}
-              className="group"
-            >
-              <Card className="h-full overflow-hidden pt-0 transition-shadow group-hover:shadow-md">
-                <div className="aspect-video overflow-hidden">
-                  <CourseImage
-                    src={course.coverImageUrl}
-                    alt={course.title}
-                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                  />
-                </div>
-                <CardHeader>
-                  <div className="mb-1 flex items-center gap-2 text-xs font-medium">
-                    <span className="text-primary">{course.categoryName}</span>
-                    {currentUserId !== null &&
-                      course.instructorId === currentUserId && (
-                        <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                          Your Course
-                        </span>
-                      )}
-                    {course.completed ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
-                        <CheckCircle2 className="size-3" />
-                        Completed
-                      </span>
-                    ) : (
-                      course.owned && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                          <CheckCircle2 className="size-3" />
-                          Purchased
-                        </span>
-                      )
-                    )}
-                  </div>
-                  <h3 className="text-lg font-semibold leading-tight group-hover:text-primary">
-                    {course.title}
-                  </h3>
-                </CardHeader>
-                <CardContent>
-                  <p className="line-clamp-2 text-sm text-muted-foreground">
-                    {course.description}
-                  </p>
-                </CardContent>
-                {course.progress !== null && course.progress > 0 && (
-                  <CardContent className="pt-0">
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">
-                        {course.completedLessons} / {course.lessonCount} lessons
-                      </span>
-                      <span className="font-medium">{course.progress}%</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${course.progress}%` }}
-                      />
-                    </div>
-                  </CardContent>
-                )}
-                <CardFooter className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <UserAvatar
-                      name={course.instructorName}
-                      avatarUrl={course.instructorAvatarUrl}
-                      className="size-5"
+            <div key={course.id} className="group relative">
+              {currentUserId !== null &&
+                !course.owned &&
+                course.instructorId !== currentUserId && (
+                  <div className="absolute right-3 top-3 z-10">
+                    <WishlistButton
+                      courseId={course.id}
+                      wishlisted={course.wishlisted}
+                      variant="icon"
                     />
-                    {course.instructorName}
-                    {course.averageRating !== null && (
-                      <>
-                        <span className="text-muted-foreground/40">·</span>
-                        <span className="flex items-center gap-0.5">
-                          <Star className="size-3 fill-amber-400 text-amber-400" />
-                          <span>{course.averageRating}</span>
-                          <span className="text-muted-foreground/60">
-                            ({course.ratingCount})
+                  </div>
+                )}
+              <Link to={`/courses/${course.slug}`} className="block h-full">
+                <Card className="h-full overflow-hidden pt-0 transition-shadow group-hover:shadow-md">
+                  <div className="aspect-video overflow-hidden">
+                    <CourseImage
+                      src={course.coverImageUrl}
+                      alt={course.title}
+                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                    />
+                  </div>
+                  <CardHeader>
+                    <div className="mb-1 flex items-center gap-2 text-xs font-medium">
+                      <span className="text-primary">
+                        {course.categoryName}
+                      </span>
+                      {currentUserId !== null &&
+                        course.instructorId === currentUserId && (
+                          <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                            Your Course
                           </span>
-                        </span>
-                      </>
-                    )}
-                  </span>
-                  {course.owned ? (
-                    <span className="flex items-center gap-1 font-semibold text-green-600 dark:text-green-400">
-                      <CheckCircle2 className="size-3.5" />
-                      {course.completed ? "Completed" : "Owned"}
-                    </span>
-                  ) : (
-                    <span className="font-semibold text-foreground">
-                      {course.pppPrice < course.price ? (
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-xs line-through text-muted-foreground font-normal">
-                            {formatPrice(course.price)}
-                          </span>
-                          {formatPrice(course.pppPrice)}
+                        )}
+                      {course.completed ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
+                          <CheckCircle2 className="size-3" />
+                          Completed
                         </span>
                       ) : (
-                        formatPrice(course.price)
+                        course.owned && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 className="size-3" />
+                            Purchased
+                          </span>
+                        )
+                      )}
+                    </div>
+                    <h3 className="text-lg font-semibold leading-tight group-hover:text-primary">
+                      {course.title}
+                    </h3>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="line-clamp-2 text-sm text-muted-foreground">
+                      {course.description}
+                    </p>
+                  </CardContent>
+                  {course.progress !== null && course.progress > 0 && (
+                    <CardContent className="pt-0">
+                      <div className="mb-1 flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">
+                          {course.completedLessons} / {course.lessonCount}{" "}
+                          lessons
+                        </span>
+                        <span className="font-medium">{course.progress}%</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${course.progress}%` }}
+                        />
+                      </div>
+                    </CardContent>
+                  )}
+                  <CardFooter className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <UserAvatar
+                        name={course.instructorName}
+                        avatarUrl={course.instructorAvatarUrl}
+                        className="size-5"
+                      />
+                      {course.instructorName}
+                      {course.averageRating !== null && (
+                        <>
+                          <span className="text-muted-foreground/40">·</span>
+                          <span className="flex items-center gap-0.5">
+                            <Star className="size-3 fill-amber-400 text-amber-400" />
+                            <span>{course.averageRating}</span>
+                            <span className="text-muted-foreground/60">
+                              ({course.ratingCount})
+                            </span>
+                          </span>
+                        </>
                       )}
                     </span>
-                  )}
-                </CardFooter>
-              </Card>
-            </Link>
+                    {course.owned ? (
+                      <span className="flex items-center gap-1 font-semibold text-green-600 dark:text-green-400">
+                        <CheckCircle2 className="size-3.5" />
+                        {course.completed ? "Completed" : "Owned"}
+                      </span>
+                    ) : (
+                      <span className="font-semibold text-foreground">
+                        {course.pppPrice < course.price ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-xs line-through text-muted-foreground font-normal">
+                              {formatPrice(course.price)}
+                            </span>
+                            {formatPrice(course.pppPrice)}
+                          </span>
+                        ) : (
+                          formatPrice(course.price)
+                        )}
+                      </span>
+                    )}
+                  </CardFooter>
+                </Card>
+              </Link>
+            </div>
           ))}
         </div>
       )}
