@@ -42,6 +42,7 @@ export enum NotificationType {
   CouponRedemption = "coupon_redemption",
   Refund = "refund",
   GiftClaimed = "gift_claimed",
+  PurchaseConfirmation = "purchase_confirmation",
 }
 
 export enum EmailStatus {

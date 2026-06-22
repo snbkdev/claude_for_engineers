@@ -182,6 +182,16 @@ describe("transactionService", () => {
       expect(notifications[0].type).toBe(schema.NotificationType.Enrollment);
     });
 
+    it("sends the buyer a purchase confirmation", () => {
+      buyForSelf({ userId: base.user.id, course: course(), country: "US" });
+
+      const notifications = getNotifications(base.user.id, 10, 0);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].type).toBe(
+        schema.NotificationType.PurchaseConfirmation
+      );
+    });
+
     it("rejects a buyer who is already enrolled", () => {
       testDb
         .insert(schema.enrollments)
@@ -946,6 +956,13 @@ describe("transactionService", () => {
       expect(
         instructorNotes.some(
           (n) => n.type === schema.NotificationType.Enrollment
+        )
+      ).toBe(true);
+      // The claimer gets their own purchase-confirmation.
+      const claimerNotes = getNotifications(claimer.id, 10, 0);
+      expect(
+        claimerNotes.some(
+          (n) => n.type === schema.NotificationType.PurchaseConfirmation
         )
       ).toBe(true);
     });

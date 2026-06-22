@@ -188,6 +188,36 @@ export function listOutbox(limit: number) {
     .all();
 }
 
+// ─── Automatic background dispatch ───
+// Kick off delivery right after a notification is queued, without blocking the
+// request. Runs are coalesced (at most one in flight; a request that arrives
+// mid-run schedules exactly one more pass) so concurrent notifications can't
+// double-send a row. Disabled under tests for determinism — they call
+// flushEmailOutbox directly with an injected adapter.
+let dispatchRunning = false;
+let dispatchQueuedAgain = false;
+
+export function scheduleEmailDispatch(): void {
+  if (process.env.VITEST) return;
+  if (dispatchRunning) {
+    dispatchQueuedAgain = true;
+    return;
+  }
+  dispatchRunning = true;
+  void (async () => {
+    try {
+      do {
+        dispatchQueuedAgain = false;
+        await flushEmailOutbox();
+      } while (dispatchQueuedAgain);
+    } catch (error) {
+      console.error("Email dispatch failed:", error);
+    } finally {
+      dispatchRunning = false;
+    }
+  })();
+}
+
 // Dispatcher: send every deliverable row via the adapter, recording sent/failed
 // and bumping the attempt count. Adapter is injectable for tests.
 export async function flushEmailOutbox(opts?: {

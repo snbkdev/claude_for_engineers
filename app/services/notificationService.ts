@@ -1,7 +1,11 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "~/db";
 import { notifications, NotificationType } from "~/db/schema";
-import { enqueueEmail, composeEmailBody } from "./emailService";
+import {
+  enqueueEmail,
+  composeEmailBody,
+  scheduleEmailDispatch,
+} from "./emailService";
 
 // ─── Notification Service ───
 // In-app notifications delivered to a recipient user. Generic by design
@@ -23,13 +27,15 @@ export function createNotification(
     .returning()
     .get();
 
-  // Mirror to email (queued; delivered by flushEmailOutbox). Best-effort: a
+  // Mirror to email (queued; delivered by the dispatcher). Best-effort: a
   // missing recipient email simply queues nothing.
   enqueueEmail({
     recipientUserId,
     subject: title,
     body: composeEmailBody(message, linkUrl),
   });
+  // Kick off automatic delivery in the background (no-op under tests).
+  scheduleEmailDispatch();
 
   return notification;
 }

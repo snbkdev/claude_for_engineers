@@ -129,6 +129,25 @@ function notifyInstructorOfEnrollment(opts: {
   );
 }
 
+// Confirmation to the learner who just gained access (self purchase, coupon
+// redemption, or gift claim) — their own "you're enrolled" email/in-app note.
+function notifyLearnerEnrolled(opts: { userId: number; courseId: number }) {
+  const course = db
+    .select({ title: courses.title, slug: courses.slug })
+    .from(courses)
+    .where(eq(courses.id, opts.courseId))
+    .get();
+  if (!course) return;
+
+  createNotification(
+    opts.userId,
+    NotificationType.PurchaseConfirmation,
+    "You're enrolled!",
+    `You now have access to ${course.title}. Happy learning!`,
+    `/courses/${course.slug}`
+  );
+}
+
 function notifyTeamAdminsOfRedemption(opts: {
   teamId: number;
   courseId: number;
@@ -235,6 +254,7 @@ export function buyForSelf(opts: {
     courseId: opts.course.id,
     userId: opts.userId,
   });
+  notifyLearnerEnrolled({ userId: opts.userId, courseId: opts.course.id });
 
   return { ok: true, data: result };
 }
@@ -366,6 +386,7 @@ export function redeem(opts: {
     courseId: coupon.courseId,
     redeemerUserId: opts.userId,
   });
+  notifyLearnerEnrolled({ userId: opts.userId, courseId: coupon.courseId });
 
   return { ok: true, data: result };
 }
@@ -464,6 +485,7 @@ export function claimGift(opts: {
     courseId: gift.courseId,
     claimerUserId: opts.userId,
   });
+  notifyLearnerEnrolled({ userId: opts.userId, courseId: gift.courseId });
 
   return {
     ok: true,
