@@ -16,6 +16,7 @@ export default [
     route("courses/:slug", "routes/courses.$slug.tsx"),
     route("courses/:slug/:moduleId", "routes/courses.$slug.$moduleId.tsx"),
     route("courses/:slug/purchase", "routes/courses.$slug.purchase.tsx"),
+    route("courses/:slug/gift", "routes/courses.$slug.gift.tsx"),
     route("courses/:slug/welcome", "routes/courses.$slug.welcome.tsx"),
     route(
       "courses/:slug/lessons/:lessonId",
@@ -50,7 +51,9 @@ export default [
     route("settings", "routes/settings.tsx"),
     route("team", "routes/team.tsx"),
     route("wishlist", "routes/wishlist.tsx"),
+    route("gifts", "routes/gifts.tsx"),
     route("redeem/:code", "routes/redeem.$code.tsx"),
+    route("gift/:code", "routes/gift.$code.tsx"),
   ]),
   route("signup", "routes/signup.tsx"),
   route("login", "routes/login.tsx"),

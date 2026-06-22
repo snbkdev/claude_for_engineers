@@ -32,6 +32,7 @@ import {
   CheckCircle2,
   Circle,
   Clock,
+  Gift,
   Pencil,
   PlayCircle,
   Star,
@@ -541,6 +542,14 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                       courseId={course.id}
                       wishlisted={wishlisted}
                     />
+                  )}
+                  {currentUserId !== null && (
+                    <Link to={`/courses/${course.slug}/gift`}>
+                      <Button variant="outline" className="w-full">
+                        <Gift className="mr-2 size-4" />
+                        Gift this course
+                      </Button>
+                    </Link>
                   )}
                 </>
               )}

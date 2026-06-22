@@ -25,6 +25,7 @@ import {
   Ticket,
   Receipt,
   Heart,
+  Gift,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -82,6 +83,12 @@ const navItems: NavItem[] = [
     label: "Wishlist",
     to: "/wishlist",
     icon: <Heart className="size-4" />,
+    roles: [UserRole.Student],
+  },
+  {
+    label: "Gifts",
+    to: "/gifts",
+    icon: <Gift className="size-4" />,
     roles: [UserRole.Student],
   },
   {

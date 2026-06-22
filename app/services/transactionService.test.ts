@@ -17,12 +17,15 @@ import {
   buyForTeam,
   redeem,
   refund,
+  buyGift,
+  claimGift,
   couponCountryMatches,
   isWithinRefundWindow,
   REFUND_WINDOW_DAYS,
   MAX_REFUND_WATCHED_LESSONS,
 } from "./transactionService";
 import { getCouponByCode } from "./couponService";
+import { getGiftByCode } from "./giftService";
 import { findEnrollment } from "./enrollmentService";
 import { createPromo, getPromoByCode } from "./promoService";
 import { getNotifications } from "./notificationService";
@@ -852,6 +855,146 @@ describe("transactionService", () => {
         .where(eq(schema.coupons.purchaseId, buy.data.purchase.id))
         .all();
       expect(remaining).toHaveLength(0);
+    });
+  });
+
+  describe("gifts", () => {
+    it("buyGift records a purchase + gift; sender is not enrolled", () => {
+      const c = paidCourse(10000);
+      const result = buyGift({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        recipientEmail: "friend@example.com",
+        message: "Enjoy!",
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.gift.recipientEmail).toBe("friend@example.com");
+      expect(result.data.gift.claimedAt).toBeNull();
+      expect(result.data.purchase.pricePaid).toBe(10000);
+      // Sender is NOT enrolled by buying a gift.
+      expect(
+        findEnrollment({ userId: base.user.id, courseId: c.id })
+      ).toBeUndefined();
+    });
+
+    it("buyGift applies a promo to the price", () => {
+      const c = paidCourse(10000);
+      createPromo({
+        code: "GIFT20",
+        discountType: schema.PromoDiscountType.Percent,
+        discountValue: 20,
+      });
+      const result = buyGift({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        recipientEmail: "friend@example.com",
+        promoCode: "GIFT20",
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.purchase.pricePaid).toBe(8000);
+      expect(getPromoByCode("GIFT20")?.redemptionCount).toBe(1);
+    });
+
+    it("rejects gifting your own course", () => {
+      const c = paidCourse(10000);
+      const result = buyGift({
+        userId: base.instructor.id,
+        course: c,
+        country: null,
+        recipientEmail: "friend@example.com",
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("claimGift enrolls the claimer and notifies sender + instructor", () => {
+      const c = paidCourse(10000);
+      const buy = buyGift({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        recipientEmail: "friend@example.com",
+      });
+      if (!buy.ok) return;
+      const claimer = createUser("Claimer", "claimer@example.com");
+
+      const result = claimGift({
+        code: buy.data.gift.code,
+        userId: claimer.id,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.courseId).toBe(c.id);
+      expect(
+        findEnrollment({ userId: claimer.id, courseId: c.id })
+      ).toBeDefined();
+
+      const claimed = getGiftByCode(buy.data.gift.code);
+      expect(claimed?.claimedByUserId).toBe(claimer.id);
+      expect(claimed?.claimedAt).toBeTruthy();
+
+      // Sender gets a "gift claimed" notification.
+      const senderNotes = getNotifications(base.user.id, 10, 0);
+      expect(
+        senderNotes.some((n) => n.type === schema.NotificationType.GiftClaimed)
+      ).toBe(true);
+      // Instructor gets the enrollment notification.
+      const instructorNotes = getNotifications(base.instructor.id, 10, 0);
+      expect(
+        instructorNotes.some(
+          (n) => n.type === schema.NotificationType.Enrollment
+        )
+      ).toBe(true);
+    });
+
+    it("rejects claiming an already-claimed gift", () => {
+      const c = paidCourse(10000);
+      const buy = buyGift({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        recipientEmail: "friend@example.com",
+      });
+      if (!buy.ok) return;
+      const a = createUser("A", "a@example.com");
+      const b = createUser("B", "b@example.com");
+
+      claimGift({ code: buy.data.gift.code, userId: a.id });
+      const second = claimGift({ code: buy.data.gift.code, userId: b.id });
+      expect(second.ok).toBe(false);
+      if (!second.ok)
+        expect(second.error).toBe("This gift has already been claimed");
+    });
+
+    it("rejects an unknown gift code", () => {
+      const result = claimGift({ code: "nope", userId: base.user.id });
+      expect(result.ok).toBe(false);
+    });
+
+    it("rejects claiming when already enrolled (gift stays unclaimed)", () => {
+      const c = paidCourse(10000);
+      const buy = buyGift({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        recipientEmail: "friend@example.com",
+      });
+      if (!buy.ok) return;
+      const claimer = createUser("Claimer", "claimer@example.com");
+      testDb
+        .insert(schema.enrollments)
+        .values({ userId: claimer.id, courseId: c.id })
+        .run();
+
+      const result = claimGift({
+        code: buy.data.gift.code,
+        userId: claimer.id,
+      });
+      expect(result.ok).toBe(false);
+      expect(getGiftByCode(buy.data.gift.code)?.claimedAt).toBeNull();
     });
   });
 });

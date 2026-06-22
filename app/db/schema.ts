@@ -41,6 +41,7 @@ export enum NotificationType {
   Enrollment = "enrollment",
   CouponRedemption = "coupon_redemption",
   Refund = "refund",
+  GiftClaimed = "gift_claimed",
 }
 
 // ─── Tables ───
@@ -256,6 +257,31 @@ export const coupons = sqliteTable("coupons", {
     .references(() => purchases.id),
   redeemedByUserId: integer("redeemed_by_user_id").references(() => users.id),
   redeemedAt: text("redeemed_at"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+// Course gifts ("buy as a gift"). The sender pays (a `purchases` row); a gift
+// row holds a unique claim `code` and the intended recipient's email. Anyone
+// logged in who opens the link can claim it (the email is informational), which
+// enrolls the claimer. One claim per gift.
+export const gifts = sqliteTable("gifts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  purchaseId: integer("purchase_id")
+    .notNull()
+    .references(() => purchases.id),
+  courseId: integer("course_id")
+    .notNull()
+    .references(() => courses.id),
+  senderId: integer("sender_id")
+    .notNull()
+    .references(() => users.id),
+  recipientEmail: text("recipient_email").notNull(),
+  message: text("message"),
+  code: text("code").notNull().unique(),
+  claimedByUserId: integer("claimed_by_user_id").references(() => users.id),
+  claimedAt: text("claimed_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

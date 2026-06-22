@@ -8,6 +8,7 @@ import {
   teamMembers,
   courses,
   users,
+  gifts,
   TeamMemberRole,
   NotificationType,
 } from "~/db/schema";
@@ -16,6 +17,7 @@ import { getTeamForAdmin, getTeamAdmins } from "./teamService";
 import { findEnrollment } from "./enrollmentService";
 import { getCouponByCode, generateCoupons } from "./couponService";
 import { createPurchase } from "./purchaseService";
+import { createGift, getGiftByCode, generateGiftCode } from "./giftService";
 import { createNotification } from "./notificationService";
 import {
   countWatchedLessonsInCourse,
@@ -366,6 +368,133 @@ export function redeem(opts: {
   });
 
   return { ok: true, data: result };
+}
+
+// ─── Entry point: buy a course as a gift ───
+// Records the purchase + a gift row (with a unique claim code) atomically. The
+// sender is NOT enrolled; the recipient claims via the code. PPP + promo apply.
+export function buyGift(opts: {
+  userId: number;
+  course: CourseLike;
+  country: string | null;
+  recipientEmail: string;
+  message?: string | null;
+  promoCode?: string | null;
+}): Result<{
+  purchase: typeof purchases.$inferSelect;
+  gift: typeof gifts.$inferSelect;
+}> {
+  if (opts.course.instructorId === opts.userId) {
+    return { ok: false, error: "You can't gift your own course" };
+  }
+
+  const pricing = resolvePricing({
+    course: opts.course,
+    country: opts.country,
+    promoCode: opts.promoCode,
+  });
+  if (!pricing.ok) return pricing;
+  const { unitPrice, promo } = pricing.data;
+
+  const result = db.transaction(() => {
+    const purchase = createPurchase({
+      userId: opts.userId,
+      courseId: opts.course.id,
+      pricePaid: unitPrice,
+      country: opts.country,
+    });
+    if (promo) incrementPromoRedemption(promo.id);
+    const gift = createGift({
+      purchaseId: purchase.id,
+      courseId: opts.course.id,
+      senderId: opts.userId,
+      recipientEmail: opts.recipientEmail,
+      message: opts.message ?? null,
+      code: generateGiftCode(),
+    });
+    return { purchase, gift };
+  });
+
+  return { ok: true, data: result };
+}
+
+// ─── Entry point: claim a gift ───
+// Validates (exists / unclaimed / not-already-enrolled), then marks the gift
+// claimed and enrolls the claimer atomically; afterwards notifies the course
+// instructor (new enrollment) and the gift sender (their gift was claimed).
+export function claimGift(opts: {
+  code: string;
+  userId: number;
+}): Result<{ enrollment: typeof enrollments.$inferSelect; courseId: number }> {
+  const gift = getGiftByCode(opts.code);
+  if (!gift) {
+    return { ok: false, error: "Gift not found" };
+  }
+  if (gift.claimedAt !== null) {
+    return { ok: false, error: "This gift has already been claimed" };
+  }
+  if (findEnrollment({ userId: opts.userId, courseId: gift.courseId })) {
+    return { ok: false, error: "You are already enrolled in this course" };
+  }
+
+  const result = db.transaction(() => {
+    db.update(gifts)
+      .set({
+        claimedByUserId: opts.userId,
+        claimedAt: new Date().toISOString(),
+      })
+      .where(eq(gifts.id, gift.id))
+      .run();
+
+    const enrollment = db
+      .insert(enrollments)
+      .values({ userId: opts.userId, courseId: gift.courseId })
+      .returning()
+      .get();
+
+    return { enrollment };
+  });
+
+  notifyInstructorOfEnrollment({
+    courseId: gift.courseId,
+    userId: opts.userId,
+  });
+  notifyGiftClaimed({
+    senderId: gift.senderId,
+    courseId: gift.courseId,
+    claimerUserId: opts.userId,
+  });
+
+  return {
+    ok: true,
+    data: { enrollment: result.enrollment, courseId: gift.courseId },
+  };
+}
+
+function notifyGiftClaimed(opts: {
+  senderId: number;
+  courseId: number;
+  claimerUserId: number;
+}) {
+  const course = db
+    .select({ title: courses.title })
+    .from(courses)
+    .where(eq(courses.id, opts.courseId))
+    .get();
+  const claimer = db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, opts.claimerUserId))
+    .get();
+  if (!course || !claimer) return;
+
+  createNotification(
+    opts.senderId,
+    NotificationType.GiftClaimed,
+    "Gift Claimed",
+    `${claimer.name} claimed your gift of ${course.title}`,
+    "/gifts"
+  );
 }
 
 // ─── Refunds / cancellation ───
