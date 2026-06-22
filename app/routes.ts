@@ -69,6 +69,7 @@ export default [
   route("api/logout", "routes/api.logout.ts"),
   route("api/video-tracking", "routes/api.video-tracking.ts"),
   route("api/wishlist", "routes/api.wishlist.ts"),
+  route("api/analytics/export", "routes/api.analytics.export.ts"),
   route("api/set-dev-country", "routes/api.set-dev-country.ts"),
   route("api/notifications/mark-read", "routes/api.notifications.mark-read.ts"),
   route(

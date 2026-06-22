@@ -3,7 +3,10 @@ import { Link, data, isRouteErrorResponse } from "react-router";
 import type { Route } from "./+types/instructor.analytics";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
-import { getCoursesByInstructor, getAllCourses } from "~/services/courseService";
+import {
+  getCoursesByInstructor,
+  getAllCourses,
+} from "~/services/courseService";
 import {
   getRevenueSummary,
   getOutstandingSeats,
@@ -28,11 +31,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { formatCents } from "~/lib/utils";
-import {
-  resolveRange,
-  PRESET_LABELS,
-  type RangePreset,
-} from "~/lib/analytics";
+import { resolveRange, PRESET_LABELS, type RangePreset } from "~/lib/analytics";
+import { AnalyticsExport } from "~/components/analytics-export";
 
 export function meta() {
   return [
@@ -145,13 +145,7 @@ export function HydrateFallback() {
   );
 }
 
-function EmptyRow({
-  colSpan,
-  message,
-}: {
-  colSpan: number;
-  message: string;
-}) {
+function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
   return (
     <tr>
       <td
@@ -204,7 +198,11 @@ function CourseBreakdownTable({ courses }: { courses: CourseRow[] }) {
     numeric?: boolean;
   }) {
     const active = sort.key === sortKey;
-    const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+    const Icon = !active
+      ? ArrowUpDown
+      : sort.dir === "asc"
+        ? ArrowUp
+        : ArrowDown;
     return (
       <th
         className={`px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground ${
@@ -397,9 +395,7 @@ export default function InstructorAnalytics({
     countryBreakdown,
   } = loaderData;
   const periodLabel =
-    range.preset === "custom"
-      ? "Selected range"
-      : PRESET_LABELS[range.preset];
+    range.preset === "custom" ? "Selected range" : PRESET_LABELS[range.preset];
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -412,13 +408,16 @@ export default function InstructorAnalytics({
         <span className="text-foreground">Analytics</span>
       </nav>
 
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Analytics</h1>
-        <p className="mt-1 text-muted-foreground">
-          {scope === "platform"
-            ? "Platform-wide revenue across all courses"
-            : "Revenue across all your courses"}
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Analytics</h1>
+          <p className="mt-1 text-muted-foreground">
+            {scope === "platform"
+              ? "Platform-wide revenue across all courses"
+              : "Revenue across all your courses"}
+          </p>
+        </div>
+        <AnalyticsExport />
       </div>
 
       {/* Date range controls */}
@@ -541,8 +540,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
           : "You don't have permission to access this page.";
     } else {
       title = `Error ${error.status}`;
-      message =
-        typeof error.data === "string" ? error.data : error.statusText;
+      message = typeof error.data === "string" ? error.data : error.statusText;
     }
   }
 

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { formatCents } from "~/lib/utils";
 import { resolveRange, PRESET_LABELS, type RangePreset } from "~/lib/analytics";
+import { AnalyticsExport } from "~/components/analytics-export";
 
 export function meta() {
   return [
@@ -416,11 +417,14 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
         <span className="text-foreground">Platform Analytics</span>
       </nav>
 
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Platform Analytics</h1>
-        <p className="mt-1 text-muted-foreground">
-          Revenue and enrollments across every course and instructor
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Platform Analytics</h1>
+          <p className="mt-1 text-muted-foreground">
+            Revenue and enrollments across every course and instructor
+          </p>
+        </div>
+        <AnalyticsExport />
       </div>
 
       {/* Time period selector */}
