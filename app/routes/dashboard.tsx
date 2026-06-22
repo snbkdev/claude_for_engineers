@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Link } from "react-router";
+import { Link, data, isRouteErrorResponse, useFetcher } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/dashboard";
 import { getUserEnrolledCourses } from "~/services/enrollmentService";
@@ -13,6 +13,13 @@ import {
 import { getCurrentUserId } from "~/lib/session";
 import { getUsersByRole } from "~/services/userService";
 import { getUserCertificates } from "~/services/certificateService";
+import { findPurchase } from "~/services/purchaseService";
+import {
+  refund,
+  isWithinRefundWindow,
+  MAX_REFUND_WATCHED_LESSONS,
+} from "~/services/transactionService";
+import { countWatchedLessonsInCourse } from "~/services/videoTrackingService";
 import {
   evaluateAchievements,
   getAchievementShowcase,
@@ -44,6 +51,7 @@ import {
   Library,
   Lock,
   PlayCircle,
+  RotateCcw,
   Sparkles,
   Target,
   Trophy,
@@ -51,7 +59,6 @@ import {
 } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
 import { cn } from "~/lib/utils";
-import { data, isRouteErrorResponse } from "react-router";
 
 export function meta() {
   return [
@@ -94,6 +101,23 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
     const isCompleted = enrollment.completedAt !== null;
 
+    // Self-service refund is available only for the student's own purchase
+    // (coupon-redeemed enrollments have no purchase row) within the window, and
+    // only before they've watched more than a few lessons.
+    const purchase = findPurchase({
+      userId: currentUserId,
+      courseId: enrollment.courseId,
+    });
+    const refundEligible =
+      purchase &&
+      !purchase.refundedAt &&
+      isWithinRefundWindow(purchase.createdAt) &&
+      countWatchedLessonsInCourse({
+        userId: currentUserId,
+        courseId: enrollment.courseId,
+      }) <= MAX_REFUND_WATCHED_LESSONS;
+    const refundPurchaseId = refundEligible ? purchase.id : null;
+
     return {
       ...enrollment,
       progress,
@@ -102,6 +126,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       nextLessonId: nextLesson?.id ?? null,
       isCompleted,
       certificateCode: certificateByCourse.get(enrollment.courseId) ?? null,
+      refundPurchaseId,
     };
   });
 
@@ -146,6 +171,32 @@ export async function loader({ request }: Route.LoaderArgs) {
     newAchievements,
     achievementShowcase,
   };
+}
+
+export async function action({ request }: Route.ActionArgs) {
+  const currentUserId = await getCurrentUserId(request);
+  if (!currentUserId) {
+    throw data("You must be logged in.", { status: 401 });
+  }
+
+  const formData = await request.formData();
+  if (formData.get("intent") === "refund") {
+    const purchaseId = Number(formData.get("purchaseId"));
+    if (isNaN(purchaseId)) {
+      throw data("Invalid purchase.", { status: 400 });
+    }
+    const result = refund({
+      purchaseId,
+      requestedByUserId: currentUserId,
+      isAdmin: false,
+    });
+    if (!result.ok) {
+      return data({ error: result.error }, { status: 400 });
+    }
+    return { success: true, message: "Purchase cancelled and refunded." };
+  }
+
+  throw data("Invalid action.", { status: 400 });
 }
 
 // Stable colored banner per course (matching the dashboard reference UI).
@@ -354,6 +405,52 @@ function AchievementsShowcase({
   );
 }
 
+function RefundButton({ purchaseId }: { purchaseId: number }) {
+  const fetcher = useFetcher<{
+    error?: string;
+    success?: boolean;
+    message?: string;
+  }>();
+  const busy = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      if (fetcher.data.error) toast.error(fetcher.data.error);
+      else if (fetcher.data.success)
+        toast.success(fetcher.data.message ?? "Refunded.");
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  return (
+    <fetcher.Form
+      method="post"
+      className="w-full"
+      onSubmit={(e) => {
+        if (
+          !confirm(
+            "Cancel this purchase and get a refund? You'll lose access to the course."
+          )
+        ) {
+          e.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value="refund" />
+      <input type="hidden" name="purchaseId" value={purchaseId} />
+      <Button
+        type="submit"
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        className="w-full text-muted-foreground hover:text-destructive"
+      >
+        <RotateCcw className="mr-2 size-4" />
+        {busy ? "Cancelling…" : "Cancel & refund"}
+      </Button>
+    </fetcher.Form>
+  );
+}
+
 function DashboardCardSkeleton() {
   return (
     <Card className="flex flex-col">
@@ -493,7 +590,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                         />
                       </div>
                     </CardContent>
-                    <CardFooter>
+                    <CardFooter className="flex-col gap-2">
                       {course.nextLessonId ? (
                         <Link
                           to={`/courses/${course.courseSlug}/lessons/${course.nextLessonId}`}
@@ -514,6 +611,9 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                             View Course
                           </Button>
                         </Link>
+                      )}
+                      {course.refundPurchaseId && (
+                        <RefundButton purchaseId={course.refundPurchaseId} />
                       )}
                     </CardFooter>
                   </Card>

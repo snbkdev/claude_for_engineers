@@ -1,0 +1,1 @@
+ALTER TABLE `purchases` ADD `refunded_at` text;

@@ -1,6 +1,6 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { db } from "~/db";
-import { videoWatchEvents, lessons } from "~/db/schema";
+import { videoWatchEvents, lessons, modules } from "~/db/schema";
 
 // ─── Video Tracking Service ───
 // Logs video watch events and calculates watch progress per lesson.
@@ -141,6 +141,56 @@ export function hasUserCompletedVideo(opts: {
     videoDurationSeconds: opts.videoDurationSeconds,
   });
   return progress >= opts.completionThreshold;
+}
+
+// Distinct lessons within a course that the user has any watch event for.
+// Used to gate self-service refunds ("watched only a few videos").
+export function countWatchedLessonsInCourse(opts: {
+  userId: number;
+  courseId: number;
+}) {
+  const result = db
+    .select({
+      count: sql<number>`count(distinct ${videoWatchEvents.lessonId})`,
+    })
+    .from(videoWatchEvents)
+    .innerJoin(lessons, eq(videoWatchEvents.lessonId, lessons.id))
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(
+      and(
+        eq(videoWatchEvents.userId, opts.userId),
+        eq(modules.courseId, opts.courseId)
+      )
+    )
+    .get();
+
+  return result?.count ?? 0;
+}
+
+// Distinct users (among `userIds`) who have any watch event in `courseId`.
+// Used to gate self-service refunds of a team purchase on how many seat holders
+// have already started watching.
+export function countViewersInCourse(opts: {
+  courseId: number;
+  userIds: number[];
+}) {
+  if (opts.userIds.length === 0) return 0;
+  const result = db
+    .select({
+      count: sql<number>`count(distinct ${videoWatchEvents.userId})`,
+    })
+    .from(videoWatchEvents)
+    .innerJoin(lessons, eq(videoWatchEvents.lessonId, lessons.id))
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(
+      and(
+        eq(modules.courseId, opts.courseId),
+        inArray(videoWatchEvents.userId, opts.userIds)
+      )
+    )
+    .get();
+
+  return result?.count ?? 0;
 }
 
 export function getUserWatchHistory(userId: number) {

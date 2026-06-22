@@ -40,6 +40,7 @@ export enum TeamMemberRole {
 export enum NotificationType {
   Enrollment = "enrollment",
   CouponRedemption = "coupon_redemption",
+  Refund = "refund",
 }
 
 // ─── Tables ───
@@ -213,6 +214,8 @@ export const purchases = sqliteTable("purchases", {
     .references(() => courses.id),
   pricePaid: integer("price_paid").notNull(),
   country: text("country"),
+  // Set when the purchase is refunded/cancelled (enrollment/coupons unwound).
+  refundedAt: text("refunded_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

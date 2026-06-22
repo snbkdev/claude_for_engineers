@@ -18,6 +18,10 @@ import { getCouponByCode, generateCoupons } from "./couponService";
 import { createPurchase } from "./purchaseService";
 import { createNotification } from "./notificationService";
 import {
+  countWatchedLessonsInCourse,
+  countViewersInCourse,
+} from "./videoTrackingService";
+import {
   validatePromo,
   computeDiscountedPrice,
   incrementPromoRedemption,
@@ -362,4 +366,159 @@ export function redeem(opts: {
   });
 
   return { ok: true, data: result };
+}
+
+// ─── Refunds / cancellation ───
+// Students may cancel their own purchase within REFUND_WINDOW_DAYS; admins may
+// refund any purchase at any time. A refund marks the purchase refunded and
+// unwinds the access it granted — atomically — then notifies the instructor.
+
+export const REFUND_WINDOW_DAYS = 30;
+const REFUND_WINDOW_MS = REFUND_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+// Self-service refunds are only available before the buyer has watched more than
+// this many distinct lessons in the course (you can sample a few, not consume it
+// and then refund). Admins can override.
+export const MAX_REFUND_WATCHED_LESSONS = 3;
+
+export function isWithinRefundWindow(
+  createdAt: string,
+  now: Date = new Date()
+): boolean {
+  return now.getTime() - new Date(createdAt).getTime() <= REFUND_WINDOW_MS;
+}
+
+function notifyInstructorOfRefund(opts: { courseId: number; userId: number }) {
+  const course = db
+    .select({ instructorId: courses.instructorId, title: courses.title })
+    .from(courses)
+    .where(eq(courses.id, opts.courseId))
+    .get();
+  const student = db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, opts.userId))
+    .get();
+  if (!course || !student) return;
+
+  createNotification(
+    course.instructorId,
+    NotificationType.Refund,
+    "Purchase Refunded",
+    `${student.name}'s purchase of ${course.title} was refunded`,
+    `/instructor/${opts.courseId}/students`
+  );
+}
+
+export function refund(opts: {
+  purchaseId: number;
+  requestedByUserId: number;
+  isAdmin?: boolean;
+  now?: Date;
+}): Result<{ team: boolean; couponsRevoked: number }> {
+  const now = opts.now ?? new Date();
+  const purchase = db
+    .select()
+    .from(purchases)
+    .where(eq(purchases.id, opts.purchaseId))
+    .get();
+  if (!purchase) {
+    return { ok: false, error: "Purchase not found" };
+  }
+  if (purchase.refundedAt) {
+    return { ok: false, error: "This purchase has already been refunded" };
+  }
+
+  // A team purchase is the one referenced by generated coupons.
+  const purchaseCoupons = db
+    .select()
+    .from(coupons)
+    .where(eq(coupons.purchaseId, purchase.id))
+    .all();
+  const isTeam = purchaseCoupons.length > 0;
+
+  const isAdmin = opts.isAdmin ?? false;
+  if (!isAdmin) {
+    if (purchase.userId !== opts.requestedByUserId) {
+      return { ok: false, error: "You can only cancel your own purchase" };
+    }
+    if (!isWithinRefundWindow(purchase.createdAt, now)) {
+      return {
+        ok: false,
+        error: `Refunds are only available within ${REFUND_WINDOW_DAYS} days of purchase`,
+      };
+    }
+    if (isTeam) {
+      // Gate on how many seat holders have already started watching.
+      const redeemerIds = purchaseCoupons
+        .map((c) => c.redeemedByUserId)
+        .filter((id): id is number => id !== null);
+      const viewers = countViewersInCourse({
+        courseId: purchase.courseId,
+        userIds: redeemerIds,
+      });
+      if (viewers > MAX_REFUND_WATCHED_LESSONS) {
+        return {
+          ok: false,
+          error: `Refunds are only available before more than ${MAX_REFUND_WATCHED_LESSONS} team members have started watching`,
+        };
+      }
+    } else {
+      const watched = countWatchedLessonsInCourse({
+        userId: purchase.userId,
+        courseId: purchase.courseId,
+      });
+      if (watched > MAX_REFUND_WATCHED_LESSONS) {
+        return {
+          ok: false,
+          error: `Refunds are only available before watching more than ${MAX_REFUND_WATCHED_LESSONS} lessons`,
+        };
+      }
+    }
+  }
+
+  db.transaction(() => {
+    db.update(purchases)
+      .set({ refundedAt: now.toISOString() })
+      .where(eq(purchases.id, purchase.id))
+      .run();
+
+    if (isTeam) {
+      // Revoke access granted by this purchase: drop enrollments of anyone who
+      // redeemed a seat, then delete all the coupons.
+      for (const c of purchaseCoupons) {
+        if (c.redeemedByUserId !== null) {
+          db.delete(enrollments)
+            .where(
+              and(
+                eq(enrollments.userId, c.redeemedByUserId),
+                eq(enrollments.courseId, c.courseId)
+              )
+            )
+            .run();
+        }
+      }
+      db.delete(coupons).where(eq(coupons.purchaseId, purchase.id)).run();
+    } else {
+      // Self purchase: remove the buyer's enrollment.
+      db.delete(enrollments)
+        .where(
+          and(
+            eq(enrollments.userId, purchase.userId),
+            eq(enrollments.courseId, purchase.courseId)
+          )
+        )
+        .run();
+    }
+  });
+
+  notifyInstructorOfRefund({
+    courseId: purchase.courseId,
+    userId: purchase.userId,
+  });
+
+  return {
+    ok: true,
+    data: { team: isTeam, couponsRevoked: purchaseCoupons.length },
+  };
 }

@@ -1,6 +1,6 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { db } from "~/db";
-import { purchases } from "~/db/schema";
+import { purchases, users, courses } from "~/db/schema";
 
 // ─── Purchase Service ───
 // Handles purchase records (transaction log separate from enrollments).
@@ -53,5 +53,26 @@ export function getPurchasesByCourse(courseId: number) {
     .select()
     .from(purchases)
     .where(eq(purchases.courseId, courseId))
+    .all();
+}
+
+// All purchases joined with buyer + course, newest first — for the admin
+// purchases/refunds view.
+export function getAllPurchasesWithDetails() {
+  return db
+    .select({
+      id: purchases.id,
+      userId: purchases.userId,
+      courseId: purchases.courseId,
+      pricePaid: purchases.pricePaid,
+      refundedAt: purchases.refundedAt,
+      createdAt: purchases.createdAt,
+      userName: users.name,
+      courseTitle: courses.title,
+    })
+    .from(purchases)
+    .innerJoin(users, eq(purchases.userId, users.id))
+    .innerJoin(courses, eq(purchases.courseId, courses.id))
+    .orderBy(desc(purchases.createdAt))
     .all();
 }

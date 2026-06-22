@@ -23,6 +23,7 @@ import {
   NotebookPen,
   Trophy,
   Ticket,
+  Receipt,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -122,6 +123,12 @@ const navItems: NavItem[] = [
     label: "Promo Codes",
     to: "/admin/promos",
     icon: <Ticket className="size-4" />,
+    roles: [UserRole.Admin],
+  },
+  {
+    label: "Purchases",
+    to: "/admin/purchases",
+    icon: <Receipt className="size-4" />,
     roles: [UserRole.Admin],
   },
 ];

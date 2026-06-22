@@ -16,9 +16,14 @@ import {
   buyForSelf,
   buyForTeam,
   redeem,
+  refund,
   couponCountryMatches,
+  isWithinRefundWindow,
+  REFUND_WINDOW_DAYS,
+  MAX_REFUND_WATCHED_LESSONS,
 } from "./transactionService";
 import { getCouponByCode } from "./couponService";
+import { findEnrollment } from "./enrollmentService";
 import { createPromo, getPromoByCode } from "./promoService";
 import { getNotifications } from "./notificationService";
 
@@ -62,6 +67,36 @@ function paidCourse(price: number) {
     pppEnabled: c.pppEnabled,
     instructorId: base.instructor.id,
   };
+}
+
+// Record `count` distinct watched lessons in `courseId` for `userId` (one
+// module + N lessons + one watch event each).
+function watchLessons(opts: {
+  userId: number;
+  courseId: number;
+  count: number;
+}) {
+  const mod = testDb
+    .insert(schema.modules)
+    .values({ courseId: opts.courseId, title: "M", position: 1 })
+    .returning()
+    .get();
+  for (let i = 0; i < opts.count; i++) {
+    const lesson = testDb
+      .insert(schema.lessons)
+      .values({ moduleId: mod.id, title: `L${i}`, position: i })
+      .returning()
+      .get();
+    testDb
+      .insert(schema.videoWatchEvents)
+      .values({
+        userId: opts.userId,
+        lessonId: lesson.id,
+        eventType: "progress",
+        positionSeconds: 10,
+      })
+      .run();
+  }
 }
 
 describe("transactionService", () => {
@@ -501,6 +536,322 @@ describe("transactionService", () => {
       // (10000 − 1000) × 3
       expect(result.data.purchase.pricePaid).toBe(27000);
       expect(getPromoByCode("TENOFF")?.redemptionCount).toBe(1);
+    });
+  });
+
+  describe("isWithinRefundWindow", () => {
+    it("is true inside the window and false past it", () => {
+      const now = new Date("2026-06-30T00:00:00.000Z");
+      const recent = new Date("2026-06-20T00:00:00.000Z").toISOString();
+      const old = new Date("2026-05-01T00:00:00.000Z").toISOString();
+      expect(isWithinRefundWindow(recent, now)).toBe(true);
+      expect(isWithinRefundWindow(old, now)).toBe(false);
+    });
+  });
+
+  describe("refund", () => {
+    it("refunds a self purchase: marks it, unwinds enrollment, notifies", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      expect(buy.ok).toBe(true);
+      if (!buy.ok) return;
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.team).toBe(false);
+
+      const purchase = testDb
+        .select()
+        .from(schema.purchases)
+        .where(eq(schema.purchases.id, buy.data.purchase.id))
+        .get();
+      expect(purchase?.refundedAt).toBeTruthy();
+
+      expect(
+        findEnrollment({ userId: base.user.id, courseId: c.id })
+      ).toBeUndefined();
+
+      const notifications = getNotifications(base.instructor.id, 10, 0);
+      expect(
+        notifications.some((n) => n.type === schema.NotificationType.Refund)
+      ).toBe(true);
+    });
+
+    it("rejects a non-owner without admin rights", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+      const other = createUser("Other", "other@example.com");
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: other.id,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("enforces the refund window for students", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+      // Backdate the purchase beyond the window.
+      const old = new Date(
+        Date.now() - (REFUND_WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000
+      ).toISOString();
+      testDb
+        .update(schema.purchases)
+        .set({ createdAt: old })
+        .where(eq(schema.purchases.id, buy.data.purchase.id))
+        .run();
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("admin override bypasses the window", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+      const old = new Date(
+        Date.now() - (REFUND_WINDOW_DAYS + 5) * 24 * 60 * 60 * 1000
+      ).toISOString();
+      testDb
+        .update(schema.purchases)
+        .set({ createdAt: old })
+        .where(eq(schema.purchases.id, buy.data.purchase.id))
+        .run();
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.instructor.id,
+        isAdmin: true,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("rejects an already-refunded purchase", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+
+      refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      const second = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(second.ok).toBe(false);
+      if (!second.ok)
+        expect(second.error).toBe("This purchase has already been refunded");
+    });
+
+    it("rejects a missing purchase", () => {
+      const result = refund({ purchaseId: 999999, requestedByUserId: 1 });
+      expect(result.ok).toBe(false);
+    });
+
+    it("blocks a self refund once more than the watched-lesson limit", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+      watchLessons({
+        userId: base.user.id,
+        courseId: c.id,
+        count: MAX_REFUND_WATCHED_LESSONS + 1,
+      });
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(result.ok).toBe(false);
+
+      // Not refunded.
+      const purchase = testDb
+        .select()
+        .from(schema.purchases)
+        .where(eq(schema.purchases.id, buy.data.purchase.id))
+        .get();
+      expect(purchase?.refundedAt).toBeNull();
+    });
+
+    it("allows a self refund at exactly the watched-lesson limit", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+      watchLessons({
+        userId: base.user.id,
+        courseId: c.id,
+        count: MAX_REFUND_WATCHED_LESSONS,
+      });
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("admin override bypasses the watched-lesson limit", () => {
+      const c = paidCourse(10000);
+      const buy = buyForSelf({
+        userId: base.user.id,
+        course: c,
+        country: null,
+      });
+      if (!buy.ok) return;
+      watchLessons({
+        userId: base.user.id,
+        courseId: c.id,
+        count: MAX_REFUND_WATCHED_LESSONS + 5,
+      });
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.instructor.id,
+        isAdmin: true,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("blocks a team self refund once more than 3 seat holders have watched", () => {
+      const c = paidCourse(10000);
+      const buy = buyForTeam({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        quantity: 4,
+      });
+      if (!buy.ok) return;
+
+      // 4 distinct redeemers each start watching a lesson in the course.
+      for (let i = 0; i < 4; i++) {
+        const u = createUser(`Member${i}`, `member${i}@example.com`);
+        redeem({ code: buy.data.coupons[i].code, userId: u.id, country: null });
+        watchLessons({ userId: u.id, courseId: c.id, count: 1 });
+      }
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(result.ok).toBe(false);
+
+      const purchase = testDb
+        .select()
+        .from(schema.purchases)
+        .where(eq(schema.purchases.id, buy.data.purchase.id))
+        .get();
+      expect(purchase?.refundedAt).toBeNull();
+    });
+
+    it("allows a team self refund when 3 or fewer seat holders have watched", () => {
+      const c = paidCourse(10000);
+      const buy = buyForTeam({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        quantity: 4,
+      });
+      if (!buy.ok) return;
+
+      // 3 redeemers watch; a 4th redeems but never watches.
+      for (let i = 0; i < 3; i++) {
+        const u = createUser(`Member${i}`, `member${i}@example.com`);
+        redeem({ code: buy.data.coupons[i].code, userId: u.id, country: null });
+        watchLessons({ userId: u.id, courseId: c.id, count: 2 });
+      }
+      const idle = createUser("Idle", "idle@example.com");
+      redeem({
+        code: buy.data.coupons[3].code,
+        userId: idle.id,
+        country: null,
+      });
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("refunds a team purchase: revokes coupons + redeemer enrollments", () => {
+      const c = paidCourse(10000);
+      const buy = buyForTeam({
+        userId: base.user.id,
+        course: c,
+        country: null,
+        quantity: 3,
+      });
+      if (!buy.ok) return;
+
+      const redeemer = createUser("Redeemer", "redeemer@example.com");
+      redeem({
+        code: buy.data.coupons[0].code,
+        userId: redeemer.id,
+        country: null,
+      });
+      expect(
+        findEnrollment({ userId: redeemer.id, courseId: c.id })
+      ).toBeDefined();
+
+      const result = refund({
+        purchaseId: buy.data.purchase.id,
+        requestedByUserId: base.user.id,
+        isAdmin: true,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.team).toBe(true);
+      expect(result.data.couponsRevoked).toBe(3);
+
+      // Redeemer's enrollment is gone and no coupons remain for the purchase.
+      expect(
+        findEnrollment({ userId: redeemer.id, courseId: c.id })
+      ).toBeUndefined();
+      const remaining = testDb
+        .select()
+        .from(schema.coupons)
+        .where(eq(schema.coupons.purchaseId, buy.data.purchase.id))
+        .all();
+      expect(remaining).toHaveLength(0);
     });
   });
 });
