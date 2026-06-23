@@ -11,6 +11,7 @@ import {
   BookOpen,
   LayoutDashboard,
   GraduationCap,
+  Search,
   Shield,
   ShieldCheck,
   Tag,
@@ -67,6 +68,12 @@ const navItems: NavItem[] = [
     label: "Browse Courses",
     to: "/courses",
     icon: <BookOpen className="size-4" />,
+    roles: "all",
+  },
+  {
+    label: "Search",
+    to: "/search",
+    icon: <Search className="size-4" />,
     roles: "all",
   },
   {

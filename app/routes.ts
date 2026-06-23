@@ -12,6 +12,7 @@ export default [
     route("leaderboard", "routes/leaderboard.tsx"),
     route("u/:userId", "routes/u.$userId.tsx"),
     route("notes", "routes/notes.tsx"),
+    route("search", "routes/search.tsx"),
     route("courses", "routes/courses.tsx"),
     route("courses/:slug", "routes/courses.$slug.tsx"),
     route("courses/:slug/:moduleId", "routes/courses.$slug.$moduleId.tsx"),
