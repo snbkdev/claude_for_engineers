@@ -70,6 +70,7 @@ export default [
     "api/lessons/:lessonId/presence",
     "routes/api.lessons.$lessonId.presence.ts"
   ),
+  route("api/set-locale", "routes/api.set-locale.ts"),
   route("api/switch-user", "routes/api.switch-user.ts"),
   route("api/logout", "routes/api.logout.ts"),
   route("api/video-tracking", "routes/api.video-tracking.ts"),

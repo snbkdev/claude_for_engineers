@@ -2,6 +2,8 @@ import { NavLink, Form } from "react-router";
 import { useState, useEffect } from "react";
 import { cn } from "~/lib/utils";
 import { UserRole } from "~/db/schema";
+import { useT } from "~/lib/i18n.context";
+import { LanguageSwitcher } from "~/components/language-switcher";
 import { UserAvatar } from "~/components/user-avatar";
 import {
   NotificationBell,
@@ -57,7 +59,7 @@ interface SidebarProps {
 }
 
 interface NavItem {
-  label: string;
+  labelKey: string;
   to: string;
   icon: React.ReactNode;
   roles: UserRole[] | "all";
@@ -65,103 +67,103 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   {
-    label: "Browse Courses",
+    labelKey: "nav.browse",
     to: "/courses",
     icon: <BookOpen className="size-4" />,
     roles: "all",
   },
   {
-    label: "Search",
+    labelKey: "nav.search",
     to: "/search",
     icon: <Search className="size-4" />,
     roles: "all",
   },
   {
-    label: "Dashboard",
+    labelKey: "nav.dashboard",
     to: "/dashboard",
     icon: <LayoutDashboard className="size-4" />,
     roles: [UserRole.Student],
   },
   {
-    label: "Leaderboard",
+    labelKey: "nav.leaderboard",
     to: "/leaderboard",
     icon: <Trophy className="size-4" />,
     roles: [UserRole.Student],
   },
   {
-    label: "Wishlist",
+    labelKey: "nav.wishlist",
     to: "/wishlist",
     icon: <Heart className="size-4" />,
     roles: [UserRole.Student],
   },
   {
-    label: "Gifts",
+    labelKey: "nav.gifts",
     to: "/gifts",
     icon: <Gift className="size-4" />,
     roles: [UserRole.Student],
   },
   {
-    label: "My Notes",
+    labelKey: "nav.notes",
     to: "/notes",
     icon: <NotebookPen className="size-4" />,
     roles: [UserRole.Student],
   },
   {
-    label: "My Courses",
+    labelKey: "nav.myCourses",
     to: "/instructor",
     icon: <GraduationCap className="size-4" />,
     roles: [UserRole.Instructor],
   },
   {
-    label: "Analytics",
+    labelKey: "nav.analytics",
     to: "/instructor/analytics",
     icon: <ChartColumn className="size-4" />,
     roles: [UserRole.Instructor],
   },
   {
-    label: "Analytics",
+    labelKey: "nav.analytics",
     to: "/admin/analytics",
     icon: <ChartColumn className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Manage Users",
+    labelKey: "nav.manageUsers",
     to: "/admin/users",
     icon: <Users className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Manage Courses",
+    labelKey: "nav.manageCourses",
     to: "/admin/courses",
     icon: <Shield className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Moderation",
+    labelKey: "nav.moderation",
     to: "/admin/moderation",
     icon: <ShieldCheck className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Categories",
+    labelKey: "nav.categories",
     to: "/admin/categories",
     icon: <Tag className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Promo Codes",
+    labelKey: "nav.promos",
     to: "/admin/promos",
     icon: <Ticket className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Purchases",
+    labelKey: "nav.purchases",
     to: "/admin/purchases",
     icon: <Receipt className="size-4" />,
     roles: [UserRole.Admin],
   },
   {
-    label: "Email Outbox",
+    labelKey: "nav.emails",
     to: "/admin/emails",
     icon: <Mail className="size-4" />,
     roles: [UserRole.Admin],
@@ -181,6 +183,7 @@ export function Sidebar({
   notifications = [],
   unreadNotificationCount = 0,
 }: SidebarProps) {
+  const t = useT();
   const currentUserRole = currentUser?.role ?? null;
   const showNotifications =
     currentUserRole === UserRole.Instructor ||
@@ -232,7 +235,7 @@ export function Sidebar({
               }
             >
               {item.icon}
-              {item.label}
+              {t(item.labelKey)}
             </NavLink>
           ))}
         {isTeamAdmin && (
@@ -248,7 +251,7 @@ export function Sidebar({
             }
           >
             <UsersRound className="size-4" />
-            Team
+            {t("nav.team")}
           </NavLink>
         )}
       </nav>
@@ -256,7 +259,7 @@ export function Sidebar({
       {recentCourses.length > 0 && (
         <div className="border-t border-sidebar-border p-3">
           <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-            Recent Courses
+            {t("nav.recentCourses")}
           </div>
           <div className="space-y-1">
             {recentCourses.map((course) => (
@@ -293,12 +296,19 @@ export function Sidebar({
       )}
 
       <div className="border-t border-sidebar-border p-3 space-y-1">
+        <LanguageSwitcher />
+
         <button
           onClick={toggleDarkMode}
+          aria-label={isDark ? t("common.lightMode") : t("common.darkMode")}
           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
-          {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-          {isDark ? "Light Mode" : "Dark Mode"}
+          {isDark ? (
+            <Sun className="size-4" aria-hidden="true" />
+          ) : (
+            <Moon className="size-4" aria-hidden="true" />
+          )}
+          {isDark ? t("common.lightMode") : t("common.darkMode")}
         </button>
 
         {currentUser && (
@@ -317,18 +327,20 @@ export function Sidebar({
             </div>
             <NavLink
               to="/settings"
-              title="Settings"
+              title={t("common.settings")}
+              aria-label={t("common.settings")}
               className="rounded-md p-1 text-sidebar-foreground/50 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
-              <Settings className="size-4" />
+              <Settings className="size-4" aria-hidden="true" />
             </NavLink>
             <Form method="post" action="/api/logout">
               <button
                 type="submit"
-                title="Sign out"
+                title={t("common.signOut")}
+                aria-label={t("common.signOut")}
                 className="rounded-md p-1 text-sidebar-foreground/50 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               >
-                <LogOut className="size-4" />
+                <LogOut className="size-4" aria-hidden="true" />
               </button>
             </Form>
           </div>

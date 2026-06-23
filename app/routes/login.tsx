@@ -14,6 +14,7 @@ import { parseFormData } from "~/lib/validation";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent } from "~/components/ui/card";
+import { useT } from "~/lib/i18n.context";
 
 const loginSchema = v.object({
   email: v.pipe(
@@ -73,6 +74,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Login() {
+  const t = useT();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -90,9 +92,11 @@ export default function Login() {
           <Link to="/" className="text-2xl font-bold tracking-tight">
             Cadence
           </Link>
-          <h1 className="mt-4 text-xl font-semibold">Welcome back</h1>
+          <h1 className="mt-4 text-xl font-semibold">
+            {t("auth.login.welcome")}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Log in to continue learning
+            {t("auth.login.subtitle")}
           </p>
         </div>
 
@@ -101,7 +105,7 @@ export default function Login() {
             <Form method="post" className="space-y-4">
               {justReset && (
                 <div className="rounded-md border border-green-500/40 bg-green-500/10 p-3 text-sm text-green-700 dark:text-green-400">
-                  Your password has been reset. Log in with your new password.
+                  {t("auth.login.resetDone")}
                 </div>
               )}
               {actionData?.error && (
@@ -115,7 +119,7 @@ export default function Login() {
                   htmlFor="email"
                   className="mb-1.5 block text-sm font-medium"
                 >
-                  Email
+                  {t("auth.email")}
                 </label>
                 <Input
                   id="email"
@@ -139,13 +143,13 @@ export default function Login() {
                     htmlFor="password"
                     className="block text-sm font-medium"
                   >
-                    Password
+                    {t("auth.password")}
                   </label>
                   <Link
                     to="/forgot-password"
                     className="text-xs text-muted-foreground hover:text-primary hover:underline"
                   >
-                    Forgot password?
+                    {t("auth.forgot")}
                   </Link>
                 </div>
                 <Input
@@ -164,19 +168,21 @@ export default function Login() {
               </div>
 
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? "Logging in..." : "Log In"}
+                {isSubmitting
+                  ? t("auth.login.submitting")
+                  : t("auth.login.submit")}
               </Button>
             </Form>
           </CardContent>
         </Card>
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          {t("auth.login.noAccount")}{" "}
           <Link
             to={signupHref}
             className="font-medium text-primary hover:underline"
           >
-            Sign up
+            {t("auth.login.signUp")}
           </Link>
         </p>
       </div>

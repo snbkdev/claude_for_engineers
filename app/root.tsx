@@ -6,10 +6,19 @@ import {
   Scripts,
   ScrollRestoration,
   useNavigation,
+  useLoaderData,
+  useRouteLoaderData,
 } from "react-router";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { resolveLocale } from "./lib/i18n.server";
+import { DEFAULT_LOCALE, isLocale } from "./lib/i18n";
+import { I18nProvider } from "./lib/i18n.context";
+
+export async function loader({ request }: Route.LoaderArgs) {
+  return { locale: await resolveLocale(request) };
+}
 
 const darkModeScript = `
 (function() {
@@ -37,8 +46,12 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  // Layout also wraps error states (where the root loader may not have run), so
+  // fall back to the default locale.
+  const data = useRouteLoaderData<typeof loader>("root");
+  const lang = isLocale(data?.locale) ? data.locale : DEFAULT_LOCALE;
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={lang} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -70,11 +83,12 @@ function NavigationLoadingBar() {
 }
 
 export default function App() {
+  const { locale } = useLoaderData<typeof loader>();
   return (
-    <>
+    <I18nProvider locale={locale}>
       <NavigationLoadingBar />
       <Outlet />
-    </>
+    </I18nProvider>
   );
 }
 
@@ -86,10 +100,14 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   if (isRouteErrorResponse(error)) {
     if (error.status === 404) {
       title = "Page not found";
-      message = "The page you're looking for doesn't exist or may have been moved.";
+      message =
+        "The page you're looking for doesn't exist or may have been moved.";
     } else {
       title = `Error ${error.status}`;
-      message = typeof error.data === "string" ? error.data : (error.statusText || message);
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : error.statusText || message;
     }
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     message = error.message;

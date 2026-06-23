@@ -14,7 +14,9 @@ export async function getSession(request: Request) {
   return sessionStorage.getSession(request.headers.get("Cookie"));
 }
 
-export async function getCurrentUserId(request: Request): Promise<number | null> {
+export async function getCurrentUserId(
+  request: Request
+): Promise<number | null> {
   const session = await getSession(request);
   const userId = session.get("userId");
   return typeof userId === "number" ? userId : null;
@@ -29,6 +31,18 @@ export async function setCurrentUserId(request: Request, userId: number) {
 export async function destroySession(request: Request) {
   const session = await getSession(request);
   return sessionStorage.destroySession(session);
+}
+
+export async function getLocale(request: Request): Promise<string | null> {
+  const session = await getSession(request);
+  const locale = session.get("locale");
+  return typeof locale === "string" ? locale : null;
+}
+
+export async function setLocale(request: Request, locale: string) {
+  const session = await getSession(request);
+  session.set("locale", locale);
+  return sessionStorage.commitSession(session);
 }
 
 export async function getDevCountry(request: Request): Promise<string | null> {
