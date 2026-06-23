@@ -51,11 +51,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
     : [];
 
-  // Notifications go to instructors (enrollments) and team admins (coupon
-  // redemptions); a user who is both sees both kinds in one bell.
+  // Notifications go to instructors (enrollments), team admins (coupon
+  // redemptions), and platform admins (course moderation queue); a user who is
+  // more than one of these sees every kind in one bell.
   const isInstructor = currentUser?.role === UserRole.Instructor;
+  const isAdmin = currentUser?.role === UserRole.Admin;
   const userIsTeamAdmin = currentUserId ? isTeamAdmin(currentUserId) : false;
-  const canSeeNotifications = isInstructor || userIsTeamAdmin;
+  const canSeeNotifications = isInstructor || isAdmin || userIsTeamAdmin;
   const notifications =
     currentUserId && canSeeNotifications
       ? getNotifications(currentUserId, 5, 0).map((n) => ({

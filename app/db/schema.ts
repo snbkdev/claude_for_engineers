@@ -18,6 +18,16 @@ export enum CourseStatus {
   Archived = "archived",
 }
 
+// Moderation review state, orthogonal to publication status. Instructors
+// self-publish (course goes live immediately); publishing also flags the course
+// for admin review (`pending`). An admin then approves (stays published) or
+// rejects (course is sent back to draft with a `rejectionReason`).
+export enum ModerationStatus {
+  Pending = "pending",
+  Approved = "approved",
+  Rejected = "rejected",
+}
+
 export enum LessonProgressStatus {
   NotStarted = "not_started",
   InProgress = "in_progress",
@@ -43,6 +53,7 @@ export enum NotificationType {
   Refund = "refund",
   GiftClaimed = "gift_claimed",
   PurchaseConfirmation = "purchase_confirmation",
+  CourseModeration = "course_moderation",
 }
 
 export enum EmailStatus {
@@ -99,6 +110,14 @@ export const courses = sqliteTable("courses", {
   sequentialUnlock: integer("sequential_unlock", { mode: "boolean" })
     .notNull()
     .default(false),
+  // Moderation: review state + the admin's reason when a course is rejected.
+  // Defaults to "approved" so existing/seeded courses aren't flagged; publishing
+  // a course flips it to "pending" for the admin moderation queue.
+  moderationStatus: text("moderation_status")
+    .notNull()
+    .$type<ModerationStatus>()
+    .default(ModerationStatus.Approved),
+  rejectionReason: text("rejection_reason"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

@@ -7,7 +7,9 @@ import {
   modules,
   lessons,
   CourseStatus,
+  ModerationStatus,
 } from "~/db/schema";
+import { desc } from "drizzle-orm";
 
 // ─── Course Service ───
 // Handles course CRUD, search, category filtering, and status transitions.
@@ -126,6 +128,8 @@ export function getCourseWithDetails(id: number) {
       price: courses.price,
       pppEnabled: courses.pppEnabled,
       sequentialUnlock: courses.sequentialUnlock,
+      moderationStatus: courses.moderationStatus,
+      rejectionReason: courses.rejectionReason,
       createdAt: courses.createdAt,
       updatedAt: courses.updatedAt,
       instructorName: users.name,
@@ -273,6 +277,43 @@ export function updateCourseSequentialUnlock(
     .where(eq(courses.id, id))
     .returning()
     .get();
+}
+
+export function setCourseModeration(opts: {
+  id: number;
+  moderationStatus: ModerationStatus;
+  rejectionReason: string | null;
+}) {
+  return db
+    .update(courses)
+    .set({
+      moderationStatus: opts.moderationStatus,
+      rejectionReason: opts.rejectionReason,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(courses.id, opts.id))
+    .returning()
+    .get();
+}
+
+// Courses awaiting admin review (the moderation queue), joined with the
+// instructor's name, newest submission first.
+export function getCoursesPendingReview() {
+  return db
+    .select({
+      id: courses.id,
+      title: courses.title,
+      slug: courses.slug,
+      status: courses.status,
+      instructorId: courses.instructorId,
+      instructorName: users.name,
+      updatedAt: courses.updatedAt,
+    })
+    .from(courses)
+    .innerJoin(users, eq(courses.instructorId, users.id))
+    .where(eq(courses.moderationStatus, ModerationStatus.Pending))
+    .orderBy(desc(courses.updatedAt), desc(courses.id))
+    .all();
 }
 
 export function deleteCourse(id: number) {

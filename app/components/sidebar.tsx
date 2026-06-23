@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   GraduationCap,
   Shield,
+  ShieldCheck,
   Tag,
   Users,
   UsersRound,
@@ -129,6 +130,12 @@ const navItems: NavItem[] = [
     roles: [UserRole.Admin],
   },
   {
+    label: "Moderation",
+    to: "/admin/moderation",
+    icon: <ShieldCheck className="size-4" />,
+    roles: [UserRole.Admin],
+  },
+  {
     label: "Categories",
     to: "/admin/categories",
     icon: <Tag className="size-4" />,
@@ -169,7 +176,9 @@ export function Sidebar({
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
   const showNotifications =
-    currentUserRole === UserRole.Instructor || isTeamAdmin;
+    currentUserRole === UserRole.Instructor ||
+    currentUserRole === UserRole.Admin ||
+    isTeamAdmin;
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {

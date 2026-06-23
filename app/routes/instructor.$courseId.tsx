@@ -38,11 +38,12 @@ import {
   getEnrollmentCountForCourse,
   getCourseEnrolledStudents,
 } from "~/services/enrollmentService";
+import { submitForReview } from "~/services/moderationService";
 import { calculateProgress } from "~/services/progressService";
 import { getQuizByLessonId, getBestAttempt } from "~/services/quizService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
-import { CourseStatus, UserRole } from "~/db/schema";
+import { CourseStatus, ModerationStatus, UserRole } from "~/db/schema";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { MonacoMarkdownEditor } from "~/components/monaco-markdown-editor";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -338,6 +339,11 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "update-status") {
     updateCourseStatus(courseId, parsed.data.status);
+    // Publishing a course flags it for admin moderation (self-publish: it's live
+    // immediately, reviewed after).
+    if (parsed.data.status === CourseStatus.Published) {
+      submitForReview(courseId);
+    }
     return { success: true, field: "status" };
   }
 
@@ -1593,6 +1599,28 @@ export default function InstructorCourseEditor({
                     </SelectContent>
                   </Select>
                 </div>
+
+                {course.moderationStatus === ModerationStatus.Pending && (
+                  <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
+                    <Clock className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      Published and awaiting admin review. It stays live while
+                      it's being moderated.
+                    </span>
+                  </div>
+                )}
+                {course.moderationStatus === ModerationStatus.Rejected && (
+                  <div className="mt-3 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      Rejected by moderation
+                      {course.rejectionReason
+                        ? `: ${course.rejectionReason}`
+                        : "."}{" "}
+                      Make changes and publish again to resubmit.
+                    </span>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

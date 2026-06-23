@@ -45,6 +45,7 @@ export default [
     route("admin/analytics", "routes/admin.analytics.tsx"),
     route("admin/users", "routes/admin.users.tsx"),
     route("admin/courses", "routes/admin.courses.tsx"),
+    route("admin/moderation", "routes/admin.moderation.tsx"),
     route("admin/categories", "routes/admin.categories.tsx"),
     route("admin/promos", "routes/admin.promos.tsx"),
     route("admin/purchases", "routes/admin.purchases.tsx"),
