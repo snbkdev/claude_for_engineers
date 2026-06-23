@@ -1,0 +1,1 @@
+ALTER TABLE `courses` ADD `sequential_unlock` integer DEFAULT false NOT NULL;

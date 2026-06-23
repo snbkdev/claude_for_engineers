@@ -94,6 +94,11 @@ export const courses = sqliteTable("courses", {
   pppEnabled: integer("ppp_enabled", { mode: "boolean" })
     .notNull()
     .default(true),
+  // Drip: when on, a lesson is locked until every earlier lesson (module then
+  // position order) is completed. Off → all lessons open immediately.
+  sequentialUnlock: integer("sequential_unlock", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

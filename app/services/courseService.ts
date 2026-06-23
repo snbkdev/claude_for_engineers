@@ -125,6 +125,7 @@ export function getCourseWithDetails(id: number) {
       coverImageUrl: courses.coverImageUrl,
       price: courses.price,
       pppEnabled: courses.pppEnabled,
+      sequentialUnlock: courses.sequentialUnlock,
       createdAt: courses.createdAt,
       updatedAt: courses.updatedAt,
       instructorName: users.name,
@@ -257,6 +258,18 @@ export function updateCoursePppEnabled(id: number, pppEnabled: boolean) {
   return db
     .update(courses)
     .set({ pppEnabled, updatedAt: new Date().toISOString() })
+    .where(eq(courses.id, id))
+    .returning()
+    .get();
+}
+
+export function updateCourseSequentialUnlock(
+  id: number,
+  sequentialUnlock: boolean
+) {
+  return db
+    .update(courses)
+    .set({ sequentialUnlock, updatedAt: new Date().toISOString() })
     .where(eq(courses.id, id))
     .returning()
     .get();

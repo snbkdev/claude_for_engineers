@@ -48,6 +48,7 @@ import {
   Clock,
   Github,
   HelpCircle,
+  Lock,
   MapPin,
   PlayCircle,
   ShieldAlert,
@@ -64,7 +65,8 @@ import { cn, formatDuration } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { LessonPresence } from "~/components/lesson-presence";
-import { data, isRouteErrorResponse } from "react-router";
+import { data, isRouteErrorResponse, redirect } from "react-router";
+import { computeUnlockedLessonIds } from "~/lib/drip";
 import * as v from "valibot";
 import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess, COUNTRIES } from "~/lib/ppp";
@@ -182,6 +184,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let isBookmarked = false;
   let bookmarkedLessonIds: number[] = [];
   let videoProgressMap: Record<number, number> = {};
+  let lockedLessonIds: number[] = [];
 
   if (currentUserId) {
     enrolled = isUserEnrolled({ userId: currentUserId, courseId: course.id });
@@ -193,12 +196,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
         courseId: course.id,
       });
 
-      // Mark lesson as in-progress when viewed
-      markLessonInProgress({ userId: currentUserId, lessonId });
-      const progress = getLessonProgress({ userId: currentUserId, lessonId });
-      lessonStatus = progress?.status ?? null;
-
-      // Get progress for all lessons in course (for curriculum sidebar)
+      // Get progress for all lessons in course (for the curriculum sidebar and
+      // for drip/sequential-unlock gating below).
       const progressRecords = getLessonProgressForCourse({
         userId: currentUserId,
         courseId: course.id,
@@ -206,6 +205,35 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
+
+      // Drip content: when the course unlocks lessons sequentially, a lesson is
+      // locked until every earlier lesson is completed. The owner/instructor
+      // bypasses this; an enrolled student is gated. Block direct access to a
+      // still-locked lesson (redirect before we mark it in-progress).
+      const isOwner = course.instructorId === currentUserId;
+      if (course.sequentialUnlock && !isOwner) {
+        const orderedLessonIds = flattenCourseLessons(courseWithDetails).map(
+          (l) => l.id
+        );
+        const completedLessonIds = new Set(
+          progressRecords
+            .filter((r) => r.status === LessonProgressStatus.Completed)
+            .map((r) => r.lessonId)
+        );
+        const unlocked = computeUnlockedLessonIds(
+          orderedLessonIds,
+          completedLessonIds
+        );
+        lockedLessonIds = orderedLessonIds.filter((id) => !unlocked.has(id));
+        if (!unlocked.has(lessonId)) {
+          throw redirect(`/courses/${slug}?locked=1`);
+        }
+      }
+
+      // Mark lesson as in-progress when viewed
+      markLessonInProgress({ userId: currentUserId, lessonId });
+      const progress = getLessonProgress({ userId: currentUserId, lessonId });
+      lessonStatus = progress?.status ?? null;
 
       // Per-lesson video watch progress (%) for the curriculum sidebar.
       const lastPosByLesson = new Map(
@@ -396,6 +424,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       lessons: m.lessons.map((l) => ({
         id: l.id,
         title: l.title,
+        locked: lockedLessonIds.includes(l.id),
       })),
     })),
     module: {
@@ -1098,7 +1127,7 @@ function CurriculumSidebar({
   curriculum: Array<{
     id: number;
     title: string;
-    lessons: Array<{ id: number; title: string }>;
+    lessons: Array<{ id: number; title: string; locked?: boolean }>;
   }>;
   currentLessonId: number;
   lessonProgressMap: Record<number, string>;
@@ -1183,34 +1212,45 @@ function CurriculumSidebar({
                       const videoPct = videoProgressMap[l.id] ?? 0;
                       const showVideoBar =
                         enrolled && !isCompleted && videoPct > 0;
+                      const isLocked = l.locked === true;
 
                       return (
                         <li key={l.id}>
-                          <Link
-                            to={`/courses/${course.slug}/lessons/${l.id}`}
-                            className={cn(
-                              "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
-                              isCurrent
-                                ? "bg-primary/10 font-medium text-primary"
-                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                            )}
-                          >
-                            {enrolled ? (
-                              isCompleted ? (
-                                <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />
-                              ) : isInProgress ? (
-                                <PlayCircle className="size-3.5 shrink-0 text-blue-500" />
+                          {isLocked ? (
+                            <span
+                              className="flex cursor-not-allowed items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground/60"
+                              title="Complete the earlier lessons to unlock this one"
+                            >
+                              <Lock className="size-3.5 shrink-0" />
+                              <span className="flex-1 truncate">{l.title}</span>
+                            </span>
+                          ) : (
+                            <Link
+                              to={`/courses/${course.slug}/lessons/${l.id}`}
+                              className={cn(
+                                "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+                                isCurrent
+                                  ? "bg-primary/10 font-medium text-primary"
+                                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                              )}
+                            >
+                              {enrolled ? (
+                                isCompleted ? (
+                                  <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />
+                                ) : isInProgress ? (
+                                  <PlayCircle className="size-3.5 shrink-0 text-blue-500" />
+                                ) : (
+                                  <Circle className="size-3.5 shrink-0" />
+                                )
                               ) : (
                                 <Circle className="size-3.5 shrink-0" />
-                              )
-                            ) : (
-                              <Circle className="size-3.5 shrink-0" />
-                            )}
-                            <span className="flex-1 truncate">{l.title}</span>
-                            {bookmarkedSet.has(l.id) && (
-                              <Bookmark className="size-3.5 shrink-0 fill-amber-500 text-amber-500" />
-                            )}
-                          </Link>
+                              )}
+                              <span className="flex-1 truncate">{l.title}</span>
+                              {bookmarkedSet.has(l.id) && (
+                                <Bookmark className="size-3.5 shrink-0 fill-amber-500 text-amber-500" />
+                              )}
+                            </Link>
+                          )}
                           {showVideoBar && (
                             <div
                               className="mx-3 mb-1 h-1 overflow-hidden rounded-full bg-muted"

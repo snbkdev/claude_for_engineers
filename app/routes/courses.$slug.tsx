@@ -289,6 +289,16 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
         { replace: true }
       );
     }
+    if (searchParams.get("locked") === "1") {
+      toast.info("Complete the earlier lessons to unlock that one.");
+      setSearchParams(
+        (prev) => {
+          prev.delete("locked");
+          return prev;
+        },
+        { replace: true }
+      );
+    }
   }, [searchParams, setSearchParams]);
 
   const totalDuration = course.modules.reduce(
