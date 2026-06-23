@@ -76,6 +76,24 @@ export const users = sqliteTable("users", {
   leaderboardOptOut: integer("leaderboard_opt_out", { mode: "boolean" })
     .notNull()
     .default(false),
+  // scrypt password hash ("salt:derivedKey"); null for accounts created before
+  // real auth or via the DevUI (those sign in by switching, not by password).
+  passwordHash: text("password_hash"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+// Single-use, time-limited password-reset tokens. Only the SHA-256 hash of the
+// token is stored; the raw token lives only in the emailed link.
+export const passwordResetTokens = sqliteTable("password_reset_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

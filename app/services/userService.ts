@@ -27,6 +27,7 @@ export function createUser(opts: {
   email: string;
   role: UserRole;
   avatarUrl: string | null;
+  passwordHash?: string | null;
 }) {
   return db
     .insert(users)
@@ -35,7 +36,17 @@ export function createUser(opts: {
       email: opts.email,
       role: opts.role,
       avatarUrl: opts.avatarUrl,
+      passwordHash: opts.passwordHash ?? null,
     })
+    .returning()
+    .get();
+}
+
+export function setUserPassword(id: number, passwordHash: string) {
+  return db
+    .update(users)
+    .set({ passwordHash })
+    .where(eq(users.id, id))
     .returning()
     .get();
 }

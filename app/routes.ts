@@ -60,6 +60,8 @@ export default [
   ]),
   route("signup", "routes/signup.tsx"),
   route("login", "routes/login.tsx"),
+  route("forgot-password", "routes/forgot-password.tsx"),
+  route("reset-password", "routes/reset-password.tsx"),
   // ─── Public certificate verification + PDF download ───
   route("certificates/:code", "routes/certificates.$code.tsx"),
   route("certificates/:code/pdf", "routes/certificates.$code.pdf.ts"),
